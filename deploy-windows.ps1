@@ -182,6 +182,31 @@ Info "Repo a jour : $REPO_DIR"
 # ---------------------------------------------------------------------------
 Step "ETAPE 5 - Telechargement des modeles"
 
+# Forcer OLLAMA_HOST pour que le CLI trouve le service
+# quelle que soit le contexte d'execution (admin vs user)
+$env:OLLAMA_HOST = "http://localhost:11434"
+
+# Verifier que l'API Ollama repond avant de tenter les pulls
+Info "Test API Ollama sur $env:OLLAMA_HOST ..."
+$ollamaReady = $false
+for ($i = 1; $i -le 5; $i++) {
+    try {
+        $resp = Invoke-RestMethod -Uri "$env:OLLAMA_HOST/api/tags" -TimeoutSec 5
+        Info "API Ollama OK (tentative $i)"
+        $ollamaReady = $true
+        break
+    } catch {
+        Warn "API Ollama non disponible (tentative $i/5) — attente 3s..."
+        Start-Sleep -Seconds 3
+    }
+}
+
+if (-not $ollamaReady) {
+    Err "API Ollama inaccessible apres 5 tentatives"
+    Err "Verifier que Ollama est demarre : Start-Process ollama -ArgumentList serve"
+    exit 1
+}
+
 $countOK   = 0
 $countFail = 0
 
