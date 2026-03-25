@@ -12,10 +12,10 @@
 
 ## Modèle A — Code (génération, refactoring, FIM, LangGraph)
 
-**`qwen2.5-coder:7b-instruct-q4_K_M`**
+**`qwen2.5-coder:7b-instruct`**
 
 ```bash
-ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+ollama pull qwen2.5-coder:7b-instruct
 ```
 
 | Attribut | Valeur |
@@ -91,10 +91,10 @@ ollama pull deepseek-r1:7b
 
 ## Modèle C — Audit sécurité / DevSecOps / CI-CD
 
-**`granite3.3:8b-instruct`**
+**`granite3.3:8b`**
 
 ```bash
-ollama pull granite3.3:8b-instruct
+ollama pull granite3.3:8b
 ```
 
 | Attribut | Valeur |
@@ -131,10 +131,10 @@ ollama pull granite3.3:8b-instruct
 
 ## Modèle D — Debug rapide / Router / Sanity check
 
-**`phi4-mini:instruct`**
+**`phi4-mini`**
 
 ```bash
-ollama pull phi4-mini:instruct
+ollama pull phi4-mini
 ```
 
 | Attribut | Valeur |
@@ -211,7 +211,7 @@ ollama pull mistral:7b-instruct-v0.3-q4_K_M
 
 ```
 Scénario A — Task courte (routing) :
-  phi4-mini:instruct → 2.4 Go VRAM
+  phi4-mini → 2.4 Go VRAM
   Disponible instantanément
 
 Scénario B — Code + review :

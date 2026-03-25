@@ -27,10 +27,10 @@ import ollama
 # ---------------------------------------------------------------------------
 
 MODELS = [
-    "qwen2.5-coder:7b-instruct-q4_K_M",
-    "granite3.3:8b-instruct",
+    "qwen2.5-coder:7b-instruct",
+    "granite3.3:8b",
     "deepseek-r1:7b",
-    "phi4-mini:instruct",
+    "phi4-mini",
     "mistral:7b-instruct-v0.3-q4_K_M",
 ]
 
@@ -484,7 +484,7 @@ cd /home/gloaguen/projets/llm-local-architecture
 python3 benchmark.py
 
 # Un seul modèle
-python3 benchmark.py --model qwen2.5-coder:7b-instruct-q4_K_M
+python3 benchmark.py --model qwen2.5-coder:7b-instruct
 
 # Un seul test
 python3 benchmark.py --test T1_langgraph_bug --runs 5

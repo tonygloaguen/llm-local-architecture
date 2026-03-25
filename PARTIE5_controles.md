@@ -85,12 +85,12 @@ from pathlib import Path
 import ollama
 
 CANARY_PROMPTS = {
-    "qwen2.5-coder:7b-instruct-q4_K_M": {
+    "qwen2.5-coder:7b-instruct": {
         "prompt": "Write a Python one-liner to compute SHA-256 of a string. Only code, no explanation.",
         "expected_keywords": ["import hashlib", "sha256", "encode", "hexdigest"],
         "timeout": 30,
     },
-    "granite3.3:8b-instruct": {
+    "granite3.3:8b": {
         "prompt": "List 3 critical security issues with 'RUN pip install requests' in a Dockerfile. One line each.",
         "expected_keywords": ["version", "hash", "pin", "supply", "trust", "verify"],
         "timeout": 30,
@@ -100,7 +100,7 @@ CANARY_PROMPTS = {
         "expected_keywords": ["105"],
         "timeout": 60,
     },
-    "phi4-mini:instruct": {
+    "phi4-mini": {
         "prompt": "What does 'set -euo pipefail' do? One sentence.",
         "expected_keywords": ["exit", "error", "unset", "pipe"],
         "timeout": 20,

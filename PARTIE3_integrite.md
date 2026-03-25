@@ -358,7 +358,7 @@ def node_router(state: OrchestratorState) -> OrchestratorState:
 ```bash
 # Re-pull forcé d'un modèle (supprime l'ancien blob)
 # À utiliser UNIQUEMENT après investigation (étape 8)
-MODEL="qwen2.5-coder:7b-instruct-q4_K_M"
+MODEL="qwen2.5-coder:7b-instruct"
 
 ollama rm "${MODEL}"
 sleep 2
@@ -374,7 +374,7 @@ manifest = json.loads(manifest_path.read_text())
 ts = datetime.datetime.utcnow().isoformat() + "Z"
 
 for model in manifest["models"]:
-    if model["name"] == "qwen2.5-coder:7b-instruct-q4_K_M":
+    if model["name"] == "qwen2.5-coder:7b-instruct":
         model["status"] = "unverified"
         model["pulled_at"] = ts
         model["last_checked"] = ts

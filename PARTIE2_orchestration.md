@@ -14,7 +14,7 @@ Un nœud Python évalue les règles en <1ms et dispatche.
 ROUTING_RULES = [
     # Priorité 1 — Audit/Sécurité
     {
-        "model": "granite3.3:8b-instruct",
+        "model": "granite3.3:8b",
         "role": "audit",
         "keywords": [
             "dockerfile", "github actions", "ci/cd", "cve", "vulnerability",
@@ -27,7 +27,7 @@ ROUTING_RULES = [
     },
     # Priorité 2 — Code (détection syntaxe)
     {
-        "model": "qwen2.5-coder:7b-instruct-q4_K_M",
+        "model": "qwen2.5-coder:7b-instruct",
         "role": "code",
         "keywords": [
             "python", "fastapi", "sqlalchemy", "langgraph", "asyncio", "async def",
@@ -63,7 +63,7 @@ ROUTING_RULES = [
     },
     # Priorité 5 — Debug rapide (fallback)
     {
-        "model": "phi4-mini:instruct",
+        "model": "phi4-mini",
         "role": "debug",
         "keywords": [
             "erreur", "error", "traceback", "exception", "bug", "crash",
@@ -186,10 +186,10 @@ class OrchestratorState(BaseModel):
 # Configuration modèles
 # ---------------------------------------------------------------------------
 MODELS = {
-    "code":     "qwen2.5-coder:7b-instruct-q4_K_M",
-    "audit":    "granite3.3:8b-instruct",
+    "code":     "qwen2.5-coder:7b-instruct",
+    "audit":    "granite3.3:8b",
     "agent":    "deepseek-r1:7b",
-    "debug":    "phi4-mini:instruct",
+    "debug":    "phi4-mini",
     "redaction": "mistral:7b-instruct-v0.3-q4_K_M",
 }
 
@@ -354,7 +354,7 @@ def node_fallback(state: OrchestratorState) -> OrchestratorState:
 
     # Ne pas boucler sur deepseek-r1 si c'était déjà le modèle primaire
     if state.routed_to == fallback_model:
-        fallback_model = "phi4-mini:instruct"
+        fallback_model = "phi4-mini"
 
     try:
         response = ollama.chat(

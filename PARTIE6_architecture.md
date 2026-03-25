@@ -84,7 +84,7 @@ EOF
 sudo systemctl daemon-reload && sudo systemctl restart ollama
 
 # Garder phi4-mini en VRAM en permanence
-ollama run phi4-mini:instruct --keepalive 87600h "Warmup" > /dev/null &
+ollama run phi4-mini --keepalive 87600h "Warmup" > /dev/null &
 ```
 
 **À la demande** (swap automatique) :
@@ -218,7 +218,7 @@ Dans l'orchestrateur :
 ```python
 import os
 LLM_ENV = os.getenv("LLM_ENV", "prod")
-MODEL_OVERRIDE = "phi4-mini:instruct" if LLM_ENV == "test" else None
+MODEL_OVERRIDE = "phi4-mini" if LLM_ENV == "test" else None
 ```
 
 ---

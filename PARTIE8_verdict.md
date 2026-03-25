@@ -4,10 +4,10 @@
 
 | Modèle | Rôle principal | VRAM Q4_K_M | tok/s (RTX 5060) | Chargement |
 |--------|---------------|-------------|-----------------|------------|
-| `qwen2.5-coder:7b-instruct-q4_K_M` | Code (Python, FastAPI, LangGraph, FIM) | ~4.1 Go | ~65 tok/s | À la demande |
-| `granite3.3:8b-instruct` | Audit, DevSecOps, CI/CD, enterprise reasoning | ~4.9 Go | ~55 tok/s | À la demande |
+| `qwen2.5-coder:7b-instruct` | Code (Python, FastAPI, LangGraph, FIM) | ~4.1 Go | ~65 tok/s | À la demande |
+| `granite3.3:8b` | Audit, DevSecOps, CI/CD, enterprise reasoning | ~4.9 Go | ~55 tok/s | À la demande |
 | `deepseek-r1:7b` | Agent brain, raisonnement structuré, orchestration | ~4.5 Go | ~60 tok/s | À la demande |
-| `phi4-mini:instruct` | Debug rapide, routing, sanity check | ~2.4 Go | ~113 tok/s | Permanent |
+| `phi4-mini` | Debug rapide, routing, sanity check | ~2.4 Go | ~113 tok/s | Permanent |
 | `mistral:7b-instruct-v0.3-q4_K_M` | Rédaction française, fallback général | ~4.1 Go | ~65 tok/s | À la demande |
 
 **Note RTX 5060 8GB** : bande passante 272 GB/s → un seul modèle 7-8B en VRAM à la
@@ -21,11 +21,11 @@ Swap Ollama automatique : ~3-5s de latence au premier appel après inactivité (
 | Fonction | Modèle affecté | Justification |
 |----------|---------------|---------------|
 | **Modèle pivot** (polyvalent) | `deepseek-r1:7b` | Chain-of-thought, raisonnement explicite → fallback universel |
-| **Modèle router** | `phi4-mini:instruct` | 2.4 Go VRAM → toujours en mémoire, classify en <1s |
+| **Modèle router** | `phi4-mini` | 2.4 Go VRAM → toujours en mémoire, classify en <1s |
 | **Modèle code** | `qwen2.5-coder:7b-instruct` | FIM natif, 128K ctx, meilleur < 8B sur Python/LangGraph |
-| **Modèle audit** | `granite3.3:8b-instruct` | Entraîné sur données enterprise, outil-calling robuste |
+| **Modèle audit** | `granite3.3:8b` | Entraîné sur données enterprise, outil-calling robuste |
 | **Modèle rédaction** | `mistral:7b-instruct-v0.3` | Référence historique francophone, registre naturel |
-| **Modèle debug** | `phi4-mini:instruct` | 3.8B, fort raisonnement/taille, réponse rapide |
+| **Modèle debug** | `phi4-mini` | 3.8B, fort raisonnement/taille, réponse rapide |
 
 ---
 
@@ -33,11 +33,11 @@ Swap Ollama automatique : ~3-5s de latence au premier appel après inactivité (
 
 ```
 Permanent (toujours en VRAM) :
-  • phi4-mini:instruct          → routing + debug instant
+  • phi4-mini          → routing + debug instant
 
 À la demande (swap automatique Ollama) :
   • qwen2.5-coder:7b-instruct   → tâches code
-  • granite3.3:8b-instruct      → tâches audit
+  • granite3.3:8b      → tâches audit
   • deepseek-r1:7b              → orchestration / raisonnement complexe
   • mistral:7b-instruct-v0.3    → rédaction française
 ```
@@ -118,17 +118,17 @@ sur Python/FastAPI/LangGraph en local à ce jour.
 
 ```bash
 # Pull complet (aussi fait par bootstrap.sh)
-ollama pull qwen2.5-coder:7b-instruct-q4_K_M
-ollama pull granite3.3:8b-instruct
+ollama pull qwen2.5-coder:7b-instruct
+ollama pull granite3.3:8b
 ollama pull deepseek-r1:7b
-ollama pull phi4-mini:instruct
+ollama pull phi4-mini
 ollama pull mistral:7b-instruct-v0.3-q4_K_M
 
 # Vérifier
 ollama list
 
 # Test rapide (phi4-mini toujours en VRAM)
-ollama run phi4-mini:instruct "Explique en une ligne ce que fait set -euo pipefail"
+ollama run phi4-mini "Explique en une ligne ce que fait set -euo pipefail"
 
 # Recheck manuel
 bash ~/.llm-local/recheck.sh

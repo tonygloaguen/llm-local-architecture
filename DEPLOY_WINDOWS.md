@@ -79,7 +79,7 @@ cd llm-local-architecture
 ollama list
 
 # Test rapide
-ollama run phi4-mini:3.8b "Dis bonjour en une phrase"
+ollama run phi4-mini "Dis bonjour en une phrase"
 
 # API Ollama
 Invoke-RestMethod -Uri "http://localhost:11434/api/tags"
