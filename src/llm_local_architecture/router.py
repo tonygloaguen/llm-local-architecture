@@ -6,7 +6,16 @@ Pas d'embedding, pas de ML, latence <1ms.
 
 from __future__ import annotations
 
+import unicodedata
+
 from .config import DEFAULT_MODEL, ROUTING_RULES
+
+
+def _normalize(text: str) -> str:
+    """Normalise un texte pour un matching simple et robuste."""
+    lowered = text.lower()
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 def route(prompt: str) -> str:
@@ -21,11 +30,11 @@ def route(prompt: str) -> str:
     Returns:
         Nom de modèle Ollama (ex: "granite3.3:8b").
     """
-    prompt_lower = prompt.lower()
+    prompt_normalized = _normalize(prompt)
 
     for rule in ROUTING_RULES:
         for keyword in rule["keywords"]:
-            if keyword in prompt_lower:
+            if _normalize(str(keyword)) in prompt_normalized:
                 return str(rule["model"])
 
     return DEFAULT_MODEL

@@ -1,0 +1,80 @@
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background: linear-gradient(180deg, #f3efe6 0%, #e5dccd 100%);
+  color: #1f1a14;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  display: grid;
+  gap: 20px;
+}
+
+.panel {
+  background: rgba(255, 252, 246, 0.92);
+  border: 1px solid #c8b89d;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 12px 30px rgba(75, 54, 33, 0.08);
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #5a4a3b;
+}
+
+form {
+  display: grid;
+  gap: 12px;
+}
+
+textarea,
+input[type="file"],
+button {
+  font: inherit;
+}
+
+textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px;
+  border: 1px solid #bba78b;
+  border-radius: 12px;
+  background: #fffdf8;
+  resize: vertical;
+}
+
+button {
+  width: fit-content;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #6d3d1d;
+  color: #fff8f1;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.meta {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.response {
+  min-height: 260px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border-radius: 12px;
+  background: #fffdf8;
+  border: 1px solid #d2c1a8;
+}
