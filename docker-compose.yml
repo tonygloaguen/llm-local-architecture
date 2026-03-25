@@ -13,6 +13,11 @@
 #    → Sur Windows Docker Desktop : host.docker.internal est résolu nativement
 #    → Sur Linux Docker Engine : extra_hosts host-gateway est requis (déjà configuré)
 #
+#  IMPORTANT
+#    Ce fichier ne déploie pas l'orchestrateur Python du projet.
+#    Open WebUI parle directement à Ollama dans les deux profils.
+#    Le routage automatique du projet ne s'applique donc pas à l'interface graphique actuelle.
+#
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -46,6 +51,7 @@ services:
       - full
 
   # ─── Open WebUI — MODE 1 : dépend du service Ollama conteneurisé ─────────
+  # Cette interface parle directement à Ollama, pas à l'orchestrateur Python.
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.6.5
     container_name: llm-webui
@@ -63,6 +69,7 @@ services:
       - full
 
   # ─── Open WebUI — MODE 2 : pointe vers Ollama natif de la machine hôte ───
+  # Cette interface parle directement à Ollama, pas à l'orchestrateur Python.
   open-webui-native:
     image: ghcr.io/open-webui/open-webui:v0.6.5
     container_name: llm-webui-native
