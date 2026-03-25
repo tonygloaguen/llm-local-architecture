@@ -5,3 +5,4 @@ src/llm_local_architecture.egg-info/
 __pycache__/
 .pytest_cache/
 .venv/
+bootstrap.sh.bak
