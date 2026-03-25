@@ -196,7 +196,7 @@ for ($i = 1; $i -le 5; $i++) {
         $ollamaReady = $true
         break
     } catch {
-        Warn "API Ollama non disponible (tentative $i/5) — attente 3s..."
+        Warn "API Ollama non disponible (tentative $i/5) - attente 3s..."
         Start-Sleep -Seconds 3
     }
 }
