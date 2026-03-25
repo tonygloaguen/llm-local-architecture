@@ -1,8 +1,8 @@
+#!/usr/bin/env pwsh
 # =============================================================================
-# deploy-windows.ps1 — Déploiement llm-local-architecture sur Windows natif
-# Prérequis : PowerShell 7+, GPU NVIDIA, accès internet
+# deploy-windows.ps1 - Deploiement llm-local-architecture sur Windows natif
+# Prerequis : PowerShell 5+, GPU NVIDIA, acces internet
 # Usage : .\deploy-windows.ps1
-# Idempotent : ré-exécutable sans effets de bord
 # =============================================================================
 
 Set-StrictMode -Version Latest
@@ -11,14 +11,13 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-$REPO_URL    = "https://github.com/tonygloaguen/llm-local-architecture.git"
-$REPO_DIR    = "$env:USERPROFILE\projets\llm-local-architecture"
-$LLMHOME     = "$env:USERPROFILE\.llm-local"
-$LOGDIR      = "$LLMHOME\logs"
-$TIMESTAMP   = Get-Date -Format "yyyyMMdd_HHmmss"
-$LOGFILE     = "$LOGDIR\deploy_windows_$TIMESTAMP.log"
+$REPO_URL   = "https://github.com/tonygloaguen/llm-local-architecture.git"
+$REPO_DIR   = Join-Path $env:USERPROFILE "projets\llm-local-architecture"
+$LLMHOME    = Join-Path $env:USERPROFILE ".llm-local"
+$LOGDIR     = Join-Path $LLMHOME "logs"
+$TIMESTAMP  = Get-Date -Format "yyyyMMdd_HHmmss"
+$LOGFILE    = Join-Path $LOGDIR "deploy_windows_$TIMESTAMP.log"
 
-# Modèles à télécharger (mêmes que bootstrap.sh)
 $MODELS = @(
     "qwen2.5-coder:7b-instruct-q4_K_M",
     "granite3.3:8b",
@@ -32,285 +31,269 @@ $MODELS = @(
 # ---------------------------------------------------------------------------
 function Write-Log {
     param([string]$Level, [string]$Message)
-    $ts = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+    $ts = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
     $line = "[$ts] [$Level] $Message"
     Write-Host $line
-    Add-Content -Path $LOGFILE -Value $line
+    if (Test-Path (Split-Path $LOGFILE)) {
+        Add-Content -Path $LOGFILE -Value $line -Encoding UTF8
+    }
 }
 
 function Info  { param([string]$m) Write-Log "INFO " $m }
 function Warn  { param([string]$m) Write-Log "WARN " $m }
-function Error { param([string]$m) Write-Log "ERROR" $m }
+function Err   { param([string]$m) Write-Log "ERROR" $m }
 
 function Step {
     param([string]$m)
     Write-Host ""
-    Write-Host "══════════════════════════════════════════════════════"
+    Write-Host "======================================================"
     Write-Host "  $m"
-    Write-Host "══════════════════════════════════════════════════════"
+    Write-Host "======================================================"
     Write-Log "STEP " $m
 }
 
-function Test-Command {
+function Test-Cmd {
     param([string]$cmd)
     return [bool](Get-Command $cmd -ErrorAction SilentlyContinue)
 }
 
-function Invoke-WithRetry {
-    param([scriptblock]$ScriptBlock, [int]$MaxAttempts = 3, [int]$DelaySeconds = 5)
+function Invoke-Retry {
+    param([scriptblock]$Block, [int]$Max = 3, [int]$Delay = 5)
     $attempt = 1
     while ($true) {
         try {
-            & $ScriptBlock
+            & $Block
             return
         } catch {
-            if ($attempt -ge $MaxAttempts) {
-                throw "Échec après $MaxAttempts tentatives : $_"
-            }
-            Warn "Tentative $attempt/$MaxAttempts échouée. Retry dans ${DelaySeconds}s..."
-            Start-Sleep -Seconds $DelaySeconds
+            if ($attempt -ge $Max) { throw $_ }
+            Warn "Tentative $attempt/$Max echouee. Retry dans ${Delay}s..."
+            Start-Sleep -Seconds $Delay
             $attempt++
         }
     }
 }
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 0 — INIT RÉPERTOIRES ET LOG
+# ETAPE 0 - INIT
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $LOGDIR | Out-Null
-New-Item -ItemType Directory -Force -Path "$LLMHOME\manifests" | Out-Null
-New-Item -ItemType Directory -Force -Path "$LLMHOME\quarantine" | Out-Null
-New-Item -ItemType Directory -Force -Path "$LLMHOME\trusted" | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $LLMHOME "manifests") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $LLMHOME "quarantine") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $LLMHOME "trusted") | Out-Null
 
-Step "ÉTAPE 0 — Initialisation"
+Step "ETAPE 0 - Initialisation"
 Info "Log : $LOGFILE"
 Info "Repo cible : $REPO_DIR"
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 1 — VÉRIFICATION GPU NVIDIA
+# ETAPE 1 - VERIFICATION GPU NVIDIA
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 1 — Vérification GPU NVIDIA"
+Step "ETAPE 1 - Verification GPU NVIDIA"
 
-try {
+if (Test-Cmd "nvidia-smi") {
     $gpuInfo = & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1
-    Info "GPU détecté : $gpuInfo"
-} catch {
-    Warn "nvidia-smi non trouvé ou GPU non détecté"
-    Warn "Ollama tournera en CPU-only"
-    Warn "Installer les drivers NVIDIA : https://www.nvidia.com/drivers"
+    Info "GPU detecte : $gpuInfo"
+} else {
+    Warn "nvidia-smi non trouve - Ollama tournera en CPU-only"
+    Warn "Installer drivers NVIDIA : https://www.nvidia.com/drivers"
 }
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 2 — INSTALLATION OLLAMA
+# ETAPE 2 - INSTALLATION OLLAMA
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 2 — Vérification / Installation Ollama"
+Step "ETAPE 2 - Verification / Installation Ollama"
 
-if (Test-Command "ollama") {
-    $ollamaVersion = & ollama --version 2>&1
-    Info "Ollama déjà installé : $ollamaVersion"
+if (Test-Cmd "ollama") {
+    $ver = & ollama --version 2>&1
+    Info "Ollama deja installe : $ver"
 } else {
-    Info "Téléchargement de Ollama pour Windows..."
-    $ollamaInstaller = "$env:TEMP\OllamaSetup.exe"
-    Invoke-WithRetry {
+    Info "Telechargement de Ollama pour Windows..."
+    $installer = Join-Path $env:TEMP "OllamaSetup.exe"
+    Invoke-Retry {
         Invoke-WebRequest -Uri "https://ollama.com/download/OllamaSetup.exe" `
-            -OutFile $ollamaInstaller -UseBasicParsing
+            -OutFile $installer -UseBasicParsing
     }
     Info "Installation Ollama..."
-    Start-Process -FilePath $ollamaInstaller -ArgumentList "/S" -Wait
-    # Recharger le PATH
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("PATH", "User")
-    if (Test-Command "ollama") {
-        Info "Ollama installé avec succès"
+    Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    if (Test-Cmd "ollama") {
+        Info "Ollama installe avec succes"
     } else {
-        Error "Ollama non trouvé après installation — redémarre PowerShell et relance"
+        Err "Ollama non trouve apres installation - redemarrer PowerShell et relancer"
         exit 1
     }
 }
 
-# Démarrer le service Ollama si pas actif
-$ollamaProcess = Get-Process -Name "ollama" -ErrorAction SilentlyContinue
-if (-not $ollamaProcess) {
-    Info "Démarrage du service Ollama..."
+# Demarrer le service Ollama si pas actif
+$proc = Get-Process -Name "ollama" -ErrorAction SilentlyContinue
+if (-not $proc) {
+    Info "Demarrage du service Ollama..."
     Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
     Start-Sleep -Seconds 3
-    Info "Service Ollama démarré"
+    Info "Service Ollama demarre"
 } else {
-    Info "Service Ollama déjà actif"
+    Info "Service Ollama deja actif (PID $($proc.Id))"
 }
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 3 — INSTALLATION DOCKER DESKTOP (optionnel)
+# ETAPE 3 - DOCKER DESKTOP
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 3 — Vérification Docker Desktop"
+Step "ETAPE 3 - Verification Docker Desktop"
 
-if (Test-Command "docker") {
-    $dockerVersion = & docker --version 2>&1
-    Info "Docker déjà installé : $dockerVersion"
+if (Test-Cmd "docker") {
+    $dv = & docker --version 2>&1
+    Info "Docker installe : $dv"
 } else {
-    Warn "Docker Desktop non trouvé"
-    Warn "Pour l'interface Open WebUI, installer Docker Desktop :"
-    Warn "https://www.docker.com/products/docker-desktop/"
-    Warn "Le déploiement continue sans Docker (Ollama seul)"
+    Warn "Docker Desktop non trouve"
+    Warn "Pour Open WebUI : https://www.docker.com/products/docker-desktop/"
+    Warn "Le deploiement continue sans Docker (Ollama seul)"
 }
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 4 — CLONAGE / MISE À JOUR DU REPO
+# ETAPE 4 - REPO
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 4 — Repo llm-local-architecture"
+Step "ETAPE 4 - Repo llm-local-architecture"
 
-if (-not (Test-Command "git")) {
-    Error "git non trouvé. Installer depuis https://git-scm.com"
+if (-not (Test-Cmd "git")) {
+    Err "git non trouve. Installer : https://git-scm.com"
     exit 1
 }
 
-if (Test-Path "$REPO_DIR\.git") {
-    Info "Repo déjà cloné — mise à jour"
+if (Test-Path (Join-Path $REPO_DIR ".git")) {
+    Info "Repo deja clone - verification a jour"
     Set-Location $REPO_DIR
-    Invoke-WithRetry { & git pull origin main 2>&1 | ForEach-Object { Info $_ } }
+    # Fetch sans merge pour eviter les conflits de branche
+    Invoke-Retry { & git fetch origin 2>&1 | ForEach-Object { Info $_ } }
+    Info "Repo a jour (fetch OK)"
 } else {
     Info "Clonage du repo..."
-    New-Item -ItemType Directory -Force -Path (Split-Path $REPO_DIR) | Out-Null
-    Invoke-WithRetry {
+    $parentDir = Split-Path $REPO_DIR
+    New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    Invoke-Retry {
         & git clone $REPO_URL $REPO_DIR 2>&1 | ForEach-Object { Info $_ }
     }
     Set-Location $REPO_DIR
 }
 
-Info "Repo à jour dans : $REPO_DIR"
+Info "Repo a jour : $REPO_DIR"
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 5 — TÉLÉCHARGEMENT DES MODÈLES
+# ETAPE 5 - TELECHARGEMENT DES MODELES
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 5 — Téléchargement des modèles"
+Step "ETAPE 5 - Telechargement des modeles"
 
-$countOK = 0
+$countOK   = 0
 $countFail = 0
 
 foreach ($model in $MODELS) {
-    # Vérifier si déjà présent
-    $ollamaList = & ollama list 2>&1
-    if ($ollamaList -match [regex]::Escape($model.Split(":")[0])) {
-        Info "Déjà présent : $model"
-    } else {
-        Info "Pull : $model"
-    }
-
+    Info "Pull : $model"
     try {
-        Invoke-WithRetry {
+        Invoke-Retry {
             & ollama pull $model 2>&1 | ForEach-Object { Write-Host "  $_" }
         }
-        Info "  → Pull réussi : $model"
+        Info "  -> Pull reussi : $model"
         $countOK++
     } catch {
-        Error "  → Échec pull : $model — $_"
+        Err "  -> Echec pull : $model"
         $countFail++
     }
 }
 
-Info "Modèles téléchargés : $countOK OK, $countFail échecs"
+Info "Modeles : $countOK OK, $countFail echecs"
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 6 — VÉRIFICATION D'INTÉGRITÉ (Windows)
+# ETAPE 6 - INTEGRITE SHA-256
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 6 — Vérification d'intégrité des blobs"
+Step "ETAPE 6 - Verification integrite des blobs"
 
-# Sous Windows, Ollama stocke dans %USERPROFILE%\.ollama\models
-$ollamaModelsDir = "$env:USERPROFILE\.ollama\models"
-
+$ollamaModelsDir = Join-Path $env:USERPROFILE ".ollama\models"
 if (-not (Test-Path $ollamaModelsDir)) {
-    # Parfois dans AppData
-    $ollamaModelsDir = "$env:LOCALAPPDATA\Ollama\models"
+    $ollamaModelsDir = Join-Path $env:LOCALAPPDATA "Ollama\models"
+}
+if (-not (Test-Path $ollamaModelsDir)) {
+    Warn "Repertoire Ollama introuvable - verification integrite ignoree"
+} else {
+    Info "Repertoire Ollama : $ollamaModelsDir"
 }
 
-Info "Répertoire Ollama : $ollamaModelsDir"
+$manifestsDir = Join-Path $ollamaModelsDir "manifests\registry.ollama.ai\library"
+$blobsDir     = Join-Path $ollamaModelsDir "blobs"
 
-$manifestsDir = "$ollamaModelsDir\manifests\registry.ollama.ai\library"
-$blobsDir = "$ollamaModelsDir\blobs"
-
-$manifestJson = @{
-    generated_at     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-    host             = $env:COMPUTERNAME
-    schema_version   = "1.2"
+$manifestData = [ordered]@{
+    generated_at      = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+    host              = $env:COMPUTERNAME
+    schema_version    = "1.2"
     ollama_models_dir = $ollamaModelsDir
-    models           = @()
+    models            = @()
 }
 
 foreach ($model in $MODELS) {
     $modelName = $model.Split(":")[0]
     $modelTag  = if ($model.Contains(":")) { $model.Split(":")[1] } else { "latest" }
+    $mPath     = Join-Path $manifestsDir "$modelName\$modelTag"
 
-    $manifestPath = "$manifestsDir\$modelName\$modelTag"
-    Info "Vérification : $model"
+    Info "Verification : $model"
 
-    if (-not (Test-Path $manifestPath)) {
-        Warn "  Manifest introuvable : $manifestPath"
-        $manifestJson.models += @{
-            name   = $model
-            status = "quarantine"
-            note   = "manifest introuvable"
-        }
+    if (-not (Test-Path $mPath)) {
+        Warn "  Manifest introuvable : $mPath"
+        $manifestData.models += [ordered]@{ name = $model; status = "quarantine"; note = "manifest introuvable" }
         continue
     }
 
-    $manifest = Get-Content $manifestPath | ConvertFrom-Json
-    $blobsOK = $true
+    $manifest = Get-Content $mPath -Raw | ConvertFrom-Json
+    $blobsOK  = $true
 
     foreach ($layer in $manifest.layers) {
         $digest   = $layer.digest
         $hash     = $digest -replace "^sha256:", ""
-        $blobPath = "$blobsDir\sha256-$hash"
+        $blobPath = Join-Path $blobsDir "sha256-$hash"
 
         if (-not (Test-Path $blobPath)) {
-            Warn "  Blob introuvable : $blobPath"
+            Warn "  Blob introuvable : sha256-$($hash.Substring(0,12))..."
             $blobsOK = $false
             continue
         }
 
-        # Calcul SHA-256 PowerShell natif
         $computed = (Get-FileHash -Algorithm SHA256 -Path $blobPath).Hash.ToLower()
-
         if ($computed -eq $hash) {
             Info "  Blob OK : $($hash.Substring(0,12))..."
         } else {
-            Warn "  DRIFT : attendu=$($hash.Substring(0,12)) calculé=$($computed.Substring(0,12))"
+            Warn "  DRIFT : attendu=$($hash.Substring(0,12)) calcule=$($computed.Substring(0,12))"
             $blobsOK = $false
         }
     }
 
     $status = if ($blobsOK) { "unverified" } else { "quarantine" }
     Info "  STATUS : $status"
-
-    $manifestJson.models += @{
-        name             = $model
+    $manifestData.models += [ordered]@{
+        name              = $model
         ollama_models_dir = $ollamaModelsDir
-        status           = $status
-        last_checked     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+        status            = $status
+        last_checked      = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
     }
 }
 
-# Écrire le manifest
-$manifestFile = "$LLMHOME\manifests\manifest.json"
-$manifestJson | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestFile -Encoding UTF8
-Info "Manifest écrit : $manifestFile"
+$manifestFile = Join-Path $LLMHOME "manifests\manifest.json"
+$manifestData | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestFile -Encoding UTF8
+Info "Manifest ecrit : $manifestFile"
 
 # ---------------------------------------------------------------------------
-# ÉTAPE 7 — LANCEMENT DOCKER COMPOSE (si Docker disponible)
+# ETAPE 7 - DOCKER COMPOSE
 # ---------------------------------------------------------------------------
-Step "ÉTAPE 7 — Docker Compose (Open WebUI)"
+Step "ETAPE 7 - Docker Compose (Open WebUI)"
 
-if (Test-Command "docker") {
+if (Test-Cmd "docker") {
     Set-Location $REPO_DIR
     try {
         & docker compose up -d 2>&1 | ForEach-Object { Info $_ }
         Info "Open WebUI accessible sur http://localhost:3000"
     } catch {
-        Warn "docker compose up échoué : $_"
-        Warn "Vérifier que Docker Desktop est lancé"
+        Warn "docker compose up echoue : $_"
+        Warn "Verifier que Docker Desktop est lance"
     }
 } else {
-    Warn "Docker non disponible — Open WebUI non lancé"
-    Warn "Ollama seul accessible sur http://localhost:11434"
+    Warn "Docker non disponible - Open WebUI non lance"
+    Info "Ollama accessible sur http://localhost:11434"
 }
 
 # ---------------------------------------------------------------------------
@@ -319,9 +302,9 @@ if (Test-Command "docker") {
 Step "RAPPORT FINAL"
 
 Write-Host ""
-Write-Host "╔══════════════════════════════════════════════════════════╗"
-Write-Host "║      DÉPLOIEMENT WINDOWS — RAPPORT FINAL                ║"
-Write-Host "╚══════════════════════════════════════════════════════════╝"
+Write-Host "======================================================"
+Write-Host "  DEPLOIEMENT WINDOWS - RAPPORT FINAL"
+Write-Host "======================================================"
 Write-Host ""
 Write-Host "  Machine         : $env:COMPUTERNAME"
 Write-Host "  Repo            : $REPO_DIR"
@@ -329,19 +312,19 @@ Write-Host "  Ollama models   : $ollamaModelsDir"
 Write-Host "  Manifest        : $manifestFile"
 Write-Host "  Log             : $LOGFILE"
 Write-Host ""
-Write-Host "  MODÈLES INSTALLÉS :"
+Write-Host "  MODELES INSTALLES :"
 foreach ($model in $MODELS) {
-    Write-Host "    → $model"
+    Write-Host "    -> $model"
 }
 Write-Host ""
-Write-Host "  ACCÈS :"
-Write-Host "    Ollama API   : http://localhost:11434"
-if (Test-Command "docker") {
-    Write-Host "    Open WebUI   : http://localhost:3000"
+Write-Host "  ACCES :"
+Write-Host "    Ollama API : http://localhost:11434"
+if (Test-Cmd "docker") {
+    Write-Host "    Open WebUI : http://localhost:3000"
 }
 Write-Host ""
 Write-Host "  TEST RAPIDE :"
 Write-Host "    ollama run phi4-mini:3.8b `"Dis bonjour en une phrase`""
 Write-Host ""
 
-Info "Déploiement Windows terminé"
+Info "Deploiement Windows termine"
