@@ -1,6 +1,8 @@
-"""Minimal Python package for repository validation."""
+"""Orchestrateur LLM local — package Python."""
 
-__all__ = ["get_package_name"]
+from .router import route
+
+__all__ = ["get_package_name", "route"]
 
 
 def get_package_name() -> str:
