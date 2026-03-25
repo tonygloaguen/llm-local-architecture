@@ -1,91 +1,103 @@
 # llm-local-architecture
 
-Environnement local de modèles LLM open-source, orchestrés et sécurisés.  
-Pas de cloud. Pas d'API payante. Tout tourne sur ta machine.
+Architecture locale pour orchestration multi-modèles LLM open-source.
+Pas de cloud. Pas d'API payante. Tout tourne sur la machine locale.
 
 ---
 
-## Ce que ce repo contient
+## État du projet
 
-| Fichier / Dossier | Rôle |
-|---|---|
-| `bootstrap.sh` | Télécharge les 5 modèles sur Linux, vérifie leur intégrité, génère le manifest |
-| `deploy-windows.ps1` | Équivalent de bootstrap.sh pour Windows PowerShell natif |
-| `docker-compose.yml` | Lance Ollama + Open WebUI en conteneurs Docker |
-| `.github/workflows/` | CI/CD automatique (lint, sécurité, déploiement) |
-| `DEPLOY_WINDOWS.md` | Guide complet déploiement Windows |
-| `PARTIE1_batch_modeles.md` | Analyse détaillée des modèles retenus |
-| `PARTIE2_orchestration.md` | Logique de routing automatique entre modèles |
-| `PARTIE3_integrite.md` | Procédures de vérification d'intégrité |
-| `PARTIE4_nis2.md` | Checklist sécurité NIS2 adaptée |
-| `PARTIE5_controles.md` | Contrôles récurrents (quotidien/hebdo/mensuel) |
-| `PARTIE6_architecture.md` | Architecture technique complète |
-| `PARTIE7_benchmark.md` | Script de benchmark local |
-| `PARTIE8_verdict.md` | Verdict final et plan de mise en œuvre |
+| Composant | Statut |
+|-----------|--------|
+| Téléchargement et vérification des modèles (Linux) | **Implémenté** — `bootstrap.sh` |
+| Téléchargement et vérification des modèles (Windows) | **Implémenté** — `deploy-windows.ps1` |
+| Registre local d'approbation des modèles | **Implémenté** — `deploy-windows.ps1` |
+| Routeur Python déterministe | **Implémenté** — `src/llm_local_architecture/router.py` |
+| API FastAPI d'orchestration (port 8001) | **Implémenté** — `src/llm_local_architecture/orchestrator.py` |
+| CLI d'orchestration | **Implémenté** — `python -m llm_local_architecture.orchestrator` |
+| Open WebUI (interface web) | **Disponible via Docker** — voir section Docker |
+| Benchmark automatisé | **Documenté** — `PARTIE7_benchmark.md` (non branché) |
+| Recheck intégrité automatique (Windows) | **Partiel** — manuel, pas de tâche planifiée |
 
 ---
 
 ## Les 5 modèles du batch
 
-| Modèle | Rôle | Taille Q4 |
-|---|---|---|
-| `qwen2.5-coder:7b-instruct-q4_K_M` | Code Python, FastAPI, LangGraph | ~4.7 Go |
+Tags exacts tels que téléchargés et validés sur machine réelle :
+
+| Modèle | Rôle | VRAM Q4 |
+|--------|------|---------|
+| `qwen2.5-coder:7b-instruct` | Code Python, FastAPI, LangGraph | ~4.1 Go |
 | `granite3.3:8b` | Audit sécurité, DevSecOps, CI/CD | ~4.9 Go |
-| `deepseek-r1:7b` | Agent brain, raisonnement, orchestration | ~4.7 Go |
-| `phi4-mini:3.8b` | Debug rapide, routing, sanity check | ~2.5 Go |
-| `mistral:7b-instruct-v0.3-q4_K_M` | Rédaction française, documents | ~4.4 Go |
+| `deepseek-r1:7b` | Raisonnement, orchestration, planification | ~4.5 Go |
+| `phi4-mini` | Debug rapide, sanity check, fallback permanent | ~2.4 Go |
+| `mistral:7b-instruct-v0.3-q4_K_M` | Rédaction française, documents | ~4.1 Go |
 
-> **Note :** Un seul modèle 7-8B tient en VRAM à la fois sur 8 Go.  
-> `phi4-mini` (2.5 Go) peut coexister avec n'importe quel autre modèle.
-
----
-
-## Comment ça marche — vue d'ensemble
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   TON USAGE QUOTIDIEN               │
-│                                                     │
-│  "Génère un module FastAPI"  →  qwen2.5-coder       │
-│  "Audite ce Dockerfile"      →  granite3.3          │
-│  "Orchestre cet agent"       →  deepseek-r1         │
-│  "Debug rapide"              →  phi4-mini           │
-│  "Rédige ce mail"            →  mistral             │
-└─────────────────────────────────────────────────────┘
-             ↓ via API locale Ollama (port 11434)
-┌─────────────────────────────────────────────────────┐
-│                      OLLAMA                         │
-│         Runtime local — gère les modèles            │
-│         API compatible OpenAI sur :11434            │
-└─────────────────────────────────────────────────────┘
-             ↓ modèles stockés dans
-┌─────────────────────────────────────────────────────┐
-│  Linux : /usr/share/ollama/.ollama/models/          │
-│  Windows : %USERPROFILE%\.ollama\models\            │
-│  Blobs vérifiés SHA-256 quotidiennement             │
-└─────────────────────────────────────────────────────┘
-```
+> **Contrainte VRAM :** un seul modèle 7-8B en mémoire à la fois sur 8 Go.
+> `phi4-mini` (2.4 Go) peut coexister avec n'importe quel autre modèle.
 
 ---
 
-## Installation selon ton OS
+## Architecture réelle
+
+```
+┌──────────────────────────────────────────────────────┐
+│  CLI / API locale (port 8001)                        │
+│  python -m llm_local_architecture.orchestrator       │
+│  POST http://localhost:8001/generate                 │
+└──────────────────────┬───────────────────────────────┘
+                       │
+             ┌─────────▼─────────┐
+             │  Routeur Python   │  routing déterministe
+             │  (keyword match)  │  <1ms, sans ML
+             └─────────┬─────────┘
+                       │ sélectionne le modèle
+             ┌─────────▼─────────────────────────────────┐
+             │  Ollama  (port 11434)                      │
+             │  Runtime local — gère le swap VRAM         │
+             │  API compatible OpenAI sur localhost       │
+             └─────────┬─────────────────────────────────┘
+                       │
+        ┌──────────────▼──────────────────┐
+        │  Modèles stockés localement      │
+        │  Linux : /usr/share/ollama/...  │
+        │  Windows : %USERPROFILE%\.ollama│
+        │  Intégrité SHA-256 vérifiée     │
+        └──────────────────────────────────┘
+```
+
+### Règles de routing (ordre = priorité)
+
+| Priorité | Mots-clés déclencheurs (exemples) | Modèle sélectionné |
+|----------|-----------------------------------|---------------------|
+| 1 | dockerfile, cve, audit, hardening, gitleaks, nis2 | `granite3.3:8b` |
+| 2 | python, fastapi, génère, implémente, class, .py | `qwen2.5-coder:7b-instruct` |
+| 3 | orchestr, planifie, stratégie, workflow, agent | `deepseek-r1:7b` |
+| 4 | rédige, reformule, mail, synthèse, compte rendu | `mistral:7b-instruct-v0.3-q4_K_M` |
+| 5 | erreur, traceback, bug, sanity check, rapide | `phi4-mini` |
+| fallback | (aucun match) | `phi4-mini` |
+
+---
+
+## Installation
 
 ### Linux (Ubuntu 24.04)
 
 ```bash
-# 1. Cloner le repo
+# 1. Installer Ollama (télécharger le binaire officiel)
+#    → https://ollama.com/download/linux
+#    Vérifier le SHA-256 fourni sur la page de téléchargement avant d'exécuter
+
+# 2. Cloner le repo
 git clone https://github.com/tonygloaguen/llm-local-architecture.git
 cd llm-local-architecture
 
-# 2. Installer Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# 3. Lancer le bootstrap (télécharge + vérifie les modèles)
+# 3. Bootstrap : télécharge les 5 modèles, vérifie l'intégrité, génère le manifest
 #    Durée : 20-60 min selon le débit réseau
 bash bootstrap.sh
 
 # 4. Tester
-ollama run phi4-mini:3.8b "Dis bonjour en une phrase"
+ollama run phi4-mini "Dis bonjour en une phrase"
 ```
 
 ### Windows (PowerShell natif + GPU NVIDIA)
@@ -100,164 +112,162 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 git clone https://github.com/tonygloaguen/llm-local-architecture.git
 cd llm-local-architecture
 
-# 4. Lancer le script de déploiement
-#    (installe Ollama automatiquement si absent)
+# 4. Déploiement (installe Ollama si absent, télécharge les modèles)
 .\deploy-windows.ps1
 
 # 5. Tester
-ollama run phi4-mini:3.8b "Dis bonjour en une phrase"
+ollama run phi4-mini "Dis bonjour en une phrase"
 ```
 
-> Pour le guide complet Windows : voir [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)
+> Guide Windows complet : [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)
 
 ---
 
-## Lancement quotidien avec Docker (Linux et Windows)
+## Utiliser l'orchestrateur
+
+### Installation du package Python
 
 ```bash
-# Démarrer Ollama + Open WebUI
-docker compose up -d
+pip install -e ".[dev]"
+```
 
-# Accéder à l'interface web
-# → http://localhost:3000
+### CLI
 
-# Arrêter
-docker compose down
+```bash
+# Routing automatique + appel Ollama
+python -m llm_local_architecture.orchestrator "Génère un module FastAPI async"
+# → [router] → qwen2.5-coder:7b-instruct
+# → (réponse du modèle)
+
+python -m llm_local_architecture.orchestrator "Audite ce Dockerfile"
+# → [router] → granite3.3:8b
+
+python -m llm_local_architecture.orchestrator "Rédige un mail de relance client"
+# → [router] → mistral:7b-instruct-v0.3-q4_K_M
+```
+
+### API FastAPI (port 8001)
+
+```bash
+# Lancer le serveur
+uvicorn llm_local_architecture.orchestrator:app --port 8001
+
+# Dry-run — voir quel modèle serait sélectionné
+curl -s -X POST http://localhost:8001/route \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Audite ce Dockerfile"}' | python3 -m json.tool
+
+# Génération complète
+curl -s -X POST http://localhost:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Génère un endpoint FastAPI GET /health"}' | python3 -m json.tool
+
+# Forcer un modèle spécifique (bypass routing)
+curl -s -X POST http://localhost:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Analyse ce texte", "model": "deepseek-r1:7b"}' | python3 -m json.tool
+
+# Lister les modèles disponibles dans Ollama
+curl -s http://localhost:8001/models | python3 -m json.tool
+```
+
+### Tests du routeur
+
+```bash
+# Tests unitaires — aucun Ollama requis
+pytest tests/test_router.py -v
 ```
 
 ---
 
-## Différences Linux vs Windows
+## Docker — Deux modes
 
-| Aspect | Linux | Windows natif |
-|---|---|---|
-| Script de déploiement | `bash bootstrap.sh` | `.\deploy-windows.ps1` |
-| Répertoire modèles | `/usr/share/ollama/.ollama/models` | `%USERPROFILE%\.ollama\models` |
-| Service Ollama | systemd | Process en tâche de fond |
-| Recheck intégrité | cron 07h00 | Tâche planifiée (manuelle) |
-| GPU | CUDA natif | CUDA natif |
-| Docker | Docker Engine | Docker Desktop |
+### MODE 1 — Linux full Docker (Ollama + WebUI dans des conteneurs)
+
+```bash
+docker compose --profile full up -d
+# → Ollama sur localhost:11434
+# → Open WebUI sur http://localhost:3000
+```
+
+Pour activer le GPU NVIDIA, décommenter le bloc `deploy` dans `docker-compose.yml`.
+
+### MODE 2 — Windows natif (ou Linux avec Ollama déjà lancé)
+
+> **Pourquoi ce mode ?**
+> Sur Windows, Ollama tourne nativement et occupe déjà le port 11434.
+> Lancer un second Ollama dans Docker provoque un conflit de port.
+> Ce mode lance uniquement Open WebUI et le connecte à l'Ollama natif.
+
+```bash
+docker compose --profile webui-only up -d
+# → Open WebUI sur http://localhost:3000
+# → Pointe vers Ollama natif (host.docker.internal:11434)
+# Prérequis : Ollama natif tourne sur localhost:11434
+```
+
+> **Note Docker Desktop Windows :** `host.docker.internal` est résolu nativement.
+> **Note Linux Docker Engine :** l'entrée `extra_hosts: host-gateway` est déjà configurée dans le compose.
 
 ---
 
-## Vérification d'intégrité
+## Vérification d'intégrité des modèles
 
-Le bootstrap vérifie automatiquement l'intégrité SHA-256 de chaque modèle après téléchargement.  
-Sur Linux, un recheck automatique tourne chaque jour à 07h00 via cron.
+### Linux
 
 ```bash
-# Recheck manuel (Linux)
+# Recheck manuel
 bash ~/.llm-local/recheck.sh
 
 # Voir le manifest
 cat ~/.llm-local/manifests/manifest.json | python3 -m json.tool
 
-# Voir les logs
-ls ~/.llm-local/logs/
+# Logs
+tail -f ~/.llm-local/logs/cron.log
 ```
 
-**Statuts possibles :**
-
-| Statut | Signification |
-|---|---|
-| `trusted` | Hash local = hash source HuggingFace — vérification totale |
-| `unverified` | Hash local OK, divergence attendue avec HF (comportement normal Ollama) |
-| `quarantine` | Problème détecté — modèle à re-télécharger |
-
----
-
-## CI/CD — Ce qui se passe automatiquement sur GitHub
-
-### À chaque push sur `dev` ou `main`
-
-Le workflow **CI** se déclenche automatiquement :
-- Lint des scripts bash avec `shellcheck`
-- Validation du `docker-compose.yml`
-- Validation des fichiers JSON
-
-### Chaque lundi à 06h00
-
-Le workflow **Security** se déclenche automatiquement :
-- Scan des secrets avec Gitleaks
-- Scan de vulnérabilités avec Trivy
-
-### Déploiement sur machine physique (manuel)
-
-Le workflow **Deploy** se lance depuis GitHub :
-
-```
-GitHub → Actions → Deploy → Run workflow
-→ Choisir la cible : linux-bare-metal ou windows-wsl2
-→ Taper "DEPLOY" pour confirmer
-```
-
-Le workflow se connecte en SSH à la machine cible et exécute :
-```bash
-git pull origin main
-docker compose pull
-docker compose up -d
-```
-
----
-
-## Branching strategy
-
-```
-main   ← branche stable, déployable, protégée
-  └── dev  ← développement quotidien
-        ├── feature/xxx  ← nouvelles fonctionnalités
-        └── fix/xxx      ← corrections
-```
-
-**Règle :** tu travailles sur `dev`, tu merges vers `main` via Pull Request quand c'est stable.  
-Le déploiement physique se fait toujours depuis `main`.
-
-```bash
-# Workflow quotidien
-git checkout dev
-git add .
-git commit -m "fix: description du changement"
-git push origin dev
-# → créer une PR dev → main sur GitHub quand prêt
-```
-
----
-
-## Ajouter une machine cible pour le déploiement
-
-### Linux
-
-```bash
-# Sur ta machine dev — générer une clé SSH dédiée
-ssh-keygen -t ed25519 -C "deploy@llm-local" -f ~/.ssh/deploy_llm -N ""
-
-# Autoriser la clé sur la machine cible
-ssh-copy-id -i ~/.ssh/deploy_llm.pub user@ip-machine-cible
-
-# Ajouter les secrets GitHub
-gh secret set DEPLOY_SSH_KEY < ~/.ssh/deploy_llm
-gh secret set DEPLOY_HOST --body "ip-machine-cible"
-gh secret set DEPLOY_USER --body "user"
-```
+Un recheck automatique tourne chaque jour à 07h00 via cron (installé par `bootstrap.sh`).
 
 ### Windows
 
 ```powershell
-# Activer SSH sur la machine Windows cible (en administrateur)
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-Start-Service sshd
-Set-Service -Name sshd -StartupType Automatic
+# Le script deploy-windows.ps1 génère et maintient un registre local
+# Voir le manifest
+notepad $env:USERPROFILE\.llm-local\manifests\manifest.json
 ```
 
-```bash
-# Depuis ta machine dev Linux — autoriser la clé
-ssh-keygen -t ed25519 -C "deploy-win@llm" -f ~/.ssh/deploy_win -N ""
-# Copier deploy_win.pub dans C:\Users\<user>\.ssh\authorized_keys sur Windows
+### Statuts des modèles
 
-# Ajouter les secrets GitHub
-gh secret set DEPLOY_SSH_KEY_WIN < ~/.ssh/deploy_win
-gh secret set DEPLOY_HOST_WIN --body "ip-machine-windows"
-gh secret set DEPLOY_USER_WIN --body "user-windows"
+| Statut | Signification | Action |
+|--------|---------------|--------|
+| `candidate` | Modèle téléchargé, pas encore approuvé | Lancer `deploy-windows.ps1` pour approuver |
+| `trusted` | Hash vérifié et approuvé dans le registre | Aucune action requise |
+| `drifted` | Hash actuel ≠ hash approuvé | Investigation — re-télécharger |
+| `quarantine` | Drift confirmé ou corruption détectée | Supprimer et re-télécharger |
+| `missing` | Modèle absent de l'inventaire local | Re-télécharger |
+
+---
+
+## CI/CD
+
+### À chaque push sur `dev` ou `main`
+
+- Lint bash avec `shellcheck`
+- Validation `docker-compose.yml`
+- Scan `pip-audit`
+
+### Chaque lundi à 06h00
+
+- Scan secrets avec Gitleaks
+- Scan CVE avec Trivy
+- Checkov sur les fichiers IaC
+
+### Déploiement manuel depuis GitHub
+
+```
+GitHub → Actions → Deploy → Run workflow
+→ Choisir la cible : linux-bare-metal ou windows-native
+→ Taper "DEPLOY" pour confirmer
 ```
 
 ---
@@ -268,38 +278,66 @@ gh secret set DEPLOY_USER_WIN --body "user-windows"
 ~/.llm-local/               (Linux)
 %USERPROFILE%\.llm-local\   (Windows)
 ├── manifests/
-│   └── manifest.json       ← état de chaque modèle
+│   └── manifest.json       ← état de chaque modèle (statut, hash, date)
 ├── logs/
-│   ├── bootstrap_*.log     ← logs d'installation
-│   ├── integrity_*.log     ← logs recheck quotidien
-│   └── cron.log            ← logs cron (Linux)
+│   ├── bootstrap_*.log
+│   ├── integrity_*.log
+│   └── cron.log            (Linux uniquement)
 ├── trusted/
 │   └── trusted_blobs.log
 └── quarantine/
     └── quarantine.log
 ```
 
-Ces fichiers sont locaux à chaque machine et non versionnés (`.gitignore`).
+Fichiers locaux à chaque machine, non versionnés.
 
 ---
 
-## Dépannage rapide
+## Dépannage
 
 | Problème | Linux | Windows |
-|---|---|---|
+|----------|-------|---------|
 | Ollama ne répond pas | `systemctl status ollama` | `Get-Process ollama` |
 | Modèle en quarantaine | `cat ~/.llm-local/quarantine/quarantine.log` | `notepad $env:USERPROFILE\.llm-local\quarantine\quarantine.log` |
-| Relancer le bootstrap | `bash bootstrap.sh` | `.\deploy-windows.ps1` |
+| Relancer le déploiement | `bash bootstrap.sh` | `.\deploy-windows.ps1` |
 | Voir les modèles | `ollama list` | `ollama list` |
-| Tester un modèle | `ollama run phi4-mini:3.8b "test"` | `ollama run phi4-mini:3.8b "test"` |
-| Open WebUI inaccessible | `docker compose ps` | `docker compose ps` |
+| Tester un modèle | `ollama run phi4-mini "test"` | `ollama run phi4-mini "test"` |
+| WebUI inaccessible | `docker compose --profile full ps` | `docker compose --profile webui-only ps` |
+| Conflit port 11434 sur Windows | N/A | Utiliser le profil `webui-only` |
+| GPU non détecté | `nvidia-smi` | `nvidia-smi.exe` (dans `C:\Windows\System32\`) |
+| Orchestrateur — Ollama injoignable | `curl http://localhost:11434/api/tags` | Idem |
 
 ---
 
-## Liens utiles
+## Différences Linux vs Windows
 
-- Repo GitHub : https://github.com/tonygloaguen/llm-local-architecture
-- Ollama : https://ollama.ai
+| Aspect | Linux | Windows natif |
+|--------|-------|---------------|
+| Script de déploiement | `bash bootstrap.sh` | `.\deploy-windows.ps1` |
+| Répertoire modèles | `/usr/share/ollama/.ollama/models` | `%USERPROFILE%\.ollama\models` |
+| Service Ollama | systemd | Process en tâche de fond |
+| Recheck intégrité | cron 07h00 (automatique) | Manuel (pas de tâche planifiée) |
+| GPU | CUDA natif | CUDA natif (RTX 5060+) |
+| Docker | Docker Engine | Docker Desktop |
+| Mode Docker recommandé | `--profile full` | `--profile webui-only` |
+
+---
+
+## Branching
+
+```
+main   ← stable, déployable, protégée
+  └── dev  ← développement quotidien
+        ├── feature/xxx
+        └── fix/xxx
+```
+
+Le déploiement physique se fait toujours depuis `main`.
+
+---
+
+## Liens
+
+- Ollama : https://ollama.com
 - Open WebUI : https://github.com/open-webui/open-webui
-- Modèles disponibles : https://ollama.com/library
-- Guide Windows complet : [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)
+- Bibliothèque de modèles : https://ollama.com/library
