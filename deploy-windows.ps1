@@ -163,11 +163,11 @@ function Get-OllamaModelsDir {
 }
 
 function Test-OllamaApi {
-    param([string]$Host)
+    param([string]$OllamaHost)
 
     for ($i = 1; $i -le 5; $i++) {
         try {
-            $null = Invoke-RestMethod -Uri "$Host/api/tags" -TimeoutSec 5
+            $null = Invoke-RestMethod -Uri "$OllamaHost/api/tags" -TimeoutSec 5
             Info "API Ollama OK (tentative $i)"
             return $true
         } catch {
@@ -371,12 +371,22 @@ Info "ApproveCandidates : $ApproveCandidates"
 # ---------------------------------------------------------------------------
 Step "ETAPE 1 - Verification GPU NVIDIA"
 
-if (Test-Cmd "nvidia-smi") {
-    $gpuInfo = & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1
-    Info "GPU detecte : $gpuInfo"
+$nvidiaSmiPath = $null
+
+if (Test-Path "C:\Windows\System32\nvidia-smi.exe") {
+    $nvidiaSmiPath = "C:\Windows\System32\nvidia-smi.exe"
+} elseif (Test-Path "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe") {
+    $nvidiaSmiPath = "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+} elseif (Get-Command "nvidia-smi" -ErrorAction SilentlyContinue) {
+    $nvidiaSmiPath = (Get-Command "nvidia-smi").Source
+}
+
+if ($nvidiaSmiPath) {
+    $gpuInfo = & $nvidiaSmiPath --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1
+    Info "GPU NVIDIA detecte : $gpuInfo"
 } else {
-    Warn "nvidia-smi non trouve - Ollama tournera en CPU-only"
-    Warn "Installer drivers NVIDIA si GPU compatible"
+    Warn "nvidia-smi introuvable - verification GPU NVIDIA incomplète"
+    Warn "Le GPU NVIDIA peut etre present physiquement, mais non verifiable via l'outil CLI"
 }
 
 # ---------------------------------------------------------------------------
@@ -422,7 +432,7 @@ if (-not $proc) {
 $env:OLLAMA_HOST = "http://localhost:11434"
 Info "Test API Ollama sur $env:OLLAMA_HOST ..."
 
-if (-not (Test-OllamaApi -Host $env:OLLAMA_HOST)) {
+if (-not (Test-OllamaApi -OllamaHost $env:OLLAMA_HOST)) {
     Err "API Ollama inaccessible apres 5 tentatives"
     exit 1
 }
@@ -655,3 +665,4 @@ Write-Host '    ollama run phi4-mini "Dis bonjour en une phrase"'
 Write-Host ""
 
 Info "Deploiement Windows termine"
+
