@@ -1,18 +1,34 @@
-version: "3.9"
+# ─────────────────────────────────────────────────────────────────────────────
+# Deux modes d'usage :
+#
+#  MODE 1 — Linux full Docker (Ollama conteneurisé + Open WebUI)
+#    docker compose --profile full up -d
+#    → Lance Ollama (port 11434) + Open WebUI (port 3000)
+#    → Décommenter le bloc "deploy" pour activer le GPU NVIDIA
+#
+#  MODE 2 — Windows natif (ou Linux avec Ollama déjà lancé en service)
+#    docker compose --profile webui-only up -d
+#    → Lance uniquement Open WebUI, pointe vers Ollama natif
+#    → Prérequis : Ollama tourne déjà sur localhost:11434
+#    → Sur Windows Docker Desktop : host.docker.internal est résolu nativement
+#    → Sur Linux Docker Engine : extra_hosts host-gateway est requis (déjà configuré)
+#
+# ─────────────────────────────────────────────────────────────────────────────
 
 services:
 
+  # ─── Ollama conteneurisé — MODE 1 (Linux full Docker) ────────────────────
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.5.13
     container_name: llm-ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
-    # Décommenter sur machine physique avec GPU NVIDIA :
+    # Décommenter pour activer le GPU NVIDIA :
     # deploy:
     #   resources:
     #     reservations:
@@ -25,10 +41,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    profiles:
+      - full
 
+  # ─── Open WebUI — MODE 1 : dépend du service Ollama conteneurisé ─────────
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.6.5
     container_name: llm-webui
     restart: unless-stopped
     ports:
@@ -41,7 +60,26 @@ services:
       ollama:
         condition: service_healthy
     profiles:
-      - ui
+      - full
+
+  # ─── Open WebUI — MODE 2 : pointe vers Ollama natif de la machine hôte ───
+  open-webui-native:
+    image: ghcr.io/open-webui/open-webui:v0.6.5
+    container_name: llm-webui-native
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      # host.docker.internal → localhost de la machine hôte
+      # Fonctionne nativement sur Docker Desktop (Windows/Mac)
+      # Sur Linux Docker Engine : résolu via extra_hosts ci-dessous
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - webui_data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles:
+      - webui-only
 
 volumes:
   ollama_data:
