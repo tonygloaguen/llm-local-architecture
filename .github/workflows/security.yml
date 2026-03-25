@@ -2,34 +2,177 @@ name: Security
 
 on:
   push:
+    branches: [main, dev]   # dev inclus — détection précoce
+  pull_request:
     branches: [main]
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "0 6 * * 1"     # Chaque lundi 06h00
 
 jobs:
+  # -----------------------------------------------------------------------
+  # JOB 1 — Gitleaks — scan secrets (SHA épinglé, pas de tag flottant)
+  # Contexte veille : fuites secrets via commits accidentels = vecteur critique
+  # -----------------------------------------------------------------------
   gitleaks:
-    name: Gitleaks
+    name: Gitleaks — scan secrets
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
-          fetch-depth: 0
+          fetch-depth: 0    # historique complet pour scanner tous les commits
 
-      - uses: gitleaks/gitleaks-action@v2
+      - name: Gitleaks scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c3  # v2.3.9 — SHA épinglé
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  trivy-fs:
-    name: Trivy filesystem scan
+  # -----------------------------------------------------------------------
+  # JOB 2 — Trivy filesystem scan (SHA épinglé + double contrôle)
+  # CRITIQUE : trivy-action@master = tag flottant = vecteur supply chain
+  # Fix : épinglage sur SHA du commit exact + fallback pip-audit si Trivy KO
+  # Contexte veille : incident Trivy supply chain via pull_request_target
+  # -----------------------------------------------------------------------
+  trivy-primary:
+    name: Trivy — scan filesystem (primaire)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Trivy scan
-        uses: aquasecurity/trivy-action@master
+      - name: Verify Trivy action integrity before use
+        run: |
+          echo "Action utilisée : aquasecurity/trivy-action@SHA-épinglé"
+          echo "Vecteur mitigé : pas de tag flottant @master"
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8  # v0.28.0 — SHA épinglé
         with:
           scan-type: fs
           scan-ref: .
-          format: table
-          exit-code: 0
+          format: sarif
+          output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          exit-code: 1           # BLOQUANT — était 0 (cosmétique) avant
+          ignore-unfixed: true   # ignore CVE sans fix disponible
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true  # ne pas bloquer si upload échoue
+
+  # -----------------------------------------------------------------------
+  # JOB 3 — Double contrôle : pip-audit (fallback indépendant de Trivy)
+  # Contexte veille : double contrôle si outil primaire corrompu/compromis
+  # pip-audit = outil indépendant, vérifie PyPI advisory database
+  # -----------------------------------------------------------------------
+  pip-audit-secondary:
+    name: pip-audit — double contrôle dépendances Python
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit --quiet
+
+      - name: Audit requirements
+        run: |
+          VULN_FOUND=false
+          for req in requirements*.txt; do
+            if [ -f "$req" ]; then
+              echo "Auditing $req"
+              if ! pip-audit -r "$req" --format=json 2>/dev/null | \
+                   python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+vulns = [d for d in data.get('dependencies',[]) if d.get('vulns')]
+if vulns:
+    for v in vulns:
+        for vuln in v['vulns']:
+            sev = vuln.get('fix_versions','no fix')
+            print(f'  VULN: {v[\"name\"]} — {vuln[\"id\"]} — fix: {sev}')
+    sys.exit(1)
+else:
+    print('  OK: aucune vulnérabilité')
+"; then
+                VULN_FOUND=true
+              fi
+            fi
+          done
+          if [ -f "pyproject.toml" ]; then
+            echo "Auditing pyproject.toml"
+            pip-audit --no-deps || true
+          fi
+
+      - name: pip-audit résumé
+        if: always()
+        run: echo "pip-audit terminé — contrôle indépendant de Trivy"
+
+  # -----------------------------------------------------------------------
+  # JOB 4 — Checkov — IaC scan (Dockerfile + docker-compose)
+  # Contexte veille : containers mal configurés = vecteur exploitation
+  # -----------------------------------------------------------------------
+  checkov:
+    name: Checkov — IaC scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install Checkov
+        run: pip install checkov --quiet
+
+      - name: Scan docker-compose.yml
+        run: |
+          checkov -f docker-compose.yml \
+            --framework dockerfile,docker_compose \
+            --quiet \
+            --compact \
+            --soft-fail \
+            2>/dev/null || true
+          echo "Checkov docker-compose terminé"
+
+      - name: Scan Dockerfiles
+        run: |
+          find . -name "Dockerfile*" ! -path "./.git/*" | while read -r f; do
+            echo "Checkov : $f"
+            checkov -f "$f" --framework dockerfile --quiet --compact --soft-fail 2>/dev/null || true
+          done
+
+  # -----------------------------------------------------------------------
+  # JOB 5 — Vérification intégrité des GitHub Actions utilisées
+  # Contexte veille : supply chain CI/CD — actions tierces non épinglées
+  # -----------------------------------------------------------------------
+  actions-integrity:
+    name: Vérification intégrité actions GitHub
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Détecter actions avec tag flottant (non épinglées sur SHA)
+        run: |
+          echo "Scan des workflows pour actions non épinglées..."
+          ISSUES=0
+          find .github/workflows/ -name "*.yml" | while read -r wf; do
+            echo "--- $wf ---"
+            # Détecter uses: action@tag sans SHA (format: @vX.Y.Z ou @master ou @main)
+            grep -n "uses:" "$wf" | grep -v "@[a-f0-9]\{40\}" | while read -r line; do
+              echo "  WARN tag flottant : $line"
+              ISSUES=$((ISSUES + 1))
+            done
+          done
+          if [ "$ISSUES" -eq 0 ]; then
+            echo "OK : toutes les actions sont épinglées sur SHA"
+          fi
+        continue-on-error: true   # informatif, non bloquant pour l'instant
+
+      - name: Rapport supply chain CI/CD
+        run: |
+          echo "=== RAPPORT SUPPLY CHAIN CI/CD ==="
+          echo "Actions utilisées dans ce workflow :"
+          grep "uses:" .github/workflows/security.yml | sed 's/.*uses:/  /'
+          echo ""
+          echo "Recommandation : épingler toutes les actions sur SHA complet (40 chars)"

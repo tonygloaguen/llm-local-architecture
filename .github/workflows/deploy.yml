@@ -4,28 +4,99 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Cible"
+        description: "Cible de déploiement"
         required: true
         default: "linux-bare-metal"
         type: choice
         options:
           - linux-bare-metal
-          - windows-wsl2
+          - windows-native
       confirm:
         description: "Taper DEPLOY pour confirmer"
         required: true
 
 jobs:
-  deploy:
-    name: Deploy ${{ github.event.inputs.target }}
+  # -----------------------------------------------------------------------
+  # JOB 1 — Pre-deploy checks (obligatoire avant tout déploiement)
+  # Contexte veille : sécurité CI/CD — vérifications avant déploiement
+  # -----------------------------------------------------------------------
+  pre-deploy-checks:
+    name: Pre-deploy security checks
     runs-on: ubuntu-24.04
     if: github.event.inputs.confirm == 'DEPLOY' && github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
 
-      - name: Deploy Linux bare metal
-        if: github.event.inputs.target == 'linux-bare-metal'
+      - name: Vérifier branche main
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "BLOQUÉ : déploiement autorisé sur main uniquement"
+            exit 1
+          fi
+          echo "OK : branche main confirmée"
+
+      - name: Scan secrets pré-déploiement (Gitleaks)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c3  # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Vérifier fichiers critiques présents
+        run: |
+          for f in bootstrap.sh docker-compose.yml README.md; do
+            [ -f "$f" ] && echo "OK : $f" || { echo "MANQUANT : $f"; exit 1; }
+          done
+
+      - name: Trivy scan pré-déploiement
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8  # v0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+
+      - name: Résumé pre-deploy
+        run: |
+          echo "=== PRE-DEPLOY CHECKS PASSÉS ==="
+          echo "Branche  : main"
+          echo "Secrets  : aucune fuite détectée"
+          echo "Trivy    : aucune CVE critique"
+          echo "Cible    : ${{ github.event.inputs.target }}"
+          echo "Heure    : $(date -u)"
+
+  # -----------------------------------------------------------------------
+  # JOB 2 — Déploiement Linux bare metal
+  # -----------------------------------------------------------------------
+  deploy-linux:
+    name: Deploy Linux bare metal
+    runs-on: ubuntu-24.04
+    needs: pre-deploy-checks
+    if: github.event.inputs.target == 'linux-bare-metal'
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Vérifier secrets requis
+        run: |
+          if [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_SSH_KEY manquant"
+            echo "Configurer dans : GitHub → Settings → Secrets → Actions"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_HOST manquant"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_USER }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_USER manquant"
+            exit 1
+          fi
+          echo "OK : tous les secrets requis sont configurés"
+
+      - name: Déploiement SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -34,13 +105,67 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=no \
-              ${DEPLOY_USER}@${DEPLOY_HOST} \
-              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d && docker compose ps'
+              -o ConnectTimeout=30 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" bash << 'REMOTE'
+            set -euo pipefail
+            echo "=== Déploiement démarré sur $(hostname) ==="
 
-      - name: Deploy Windows WSL2
-        if: github.event.inputs.target == 'windows-wsl2'
+            cd ~/projets/llm-local-architecture
+
+            # Git pull
+            git pull origin main
+            echo "OK : git pull"
+
+            # Vérifier intégrité des modèles avant déploiement
+            if [ -f ~/.llm-local/recheck.sh ]; then
+              bash ~/.llm-local/recheck.sh && echo "OK : intégrité modèles" || \
+                echo "WARN : dérive détectée — voir ~/.llm-local/logs/"
+            fi
+
+            # Docker
+            docker compose pull
+            docker compose up -d
+            docker compose ps
+
+            echo "=== Déploiement terminé sur $(hostname) ==="
+          REMOTE
+
+      - name: Nettoyage clé SSH
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  # -----------------------------------------------------------------------
+  # JOB 3 — Déploiement Windows natif
+  # -----------------------------------------------------------------------
+  deploy-windows:
+    name: Deploy Windows natif
+    runs-on: ubuntu-24.04
+    needs: pre-deploy-checks
+    if: github.event.inputs.target == 'windows-native'
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Vérifier secrets requis
+        run: |
+          if [ -z "${{ secrets.DEPLOY_SSH_KEY_WIN }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_SSH_KEY_WIN manquant"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_HOST_WIN }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_HOST_WIN manquant"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_USER_WIN }}" ]; then
+            echo "BLOQUÉ : secret DEPLOY_USER_WIN manquant"
+            exit 1
+          fi
+          echo "OK : tous les secrets Windows requis sont configurés"
+
+      - name: Déploiement SSH Windows
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY_WIN }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST_WIN }}
@@ -49,8 +174,14 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key_win
           chmod 600 ~/.ssh/deploy_key_win
+
+          # Windows OpenSSH écoute par défaut sur port 22
           ssh -i ~/.ssh/deploy_key_win \
-              -p 2222 \
               -o StrictHostKeyChecking=no \
-              ${DEPLOY_USER}@${DEPLOY_HOST_WIN} \
-              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d'
+              -o ConnectTimeout=30 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "cd %USERPROFILE%\projets\llm-local-architecture && git pull origin main && powershell -ExecutionPolicy Bypass -File deploy-windows.ps1"
+
+      - name: Nettoyage clé SSH
+        if: always()
+        run: rm -f ~/.ssh/deploy_key_win
