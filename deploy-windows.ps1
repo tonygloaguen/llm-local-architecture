@@ -160,9 +160,11 @@ if (-not (Test-Cmd "git")) {
 }
 
 if (Test-Path (Join-Path $REPO_DIR ".git")) {
-    Info "Repo deja clone - mise a jour"
+    Info "Repo deja clone - verification a jour"
     Set-Location $REPO_DIR
-    Invoke-Retry { & git pull origin main 2>&1 | ForEach-Object { Info $_ } }
+    # Fetch sans merge pour eviter les conflits de branche
+    Invoke-Retry { & git fetch origin 2>&1 | ForEach-Object { Info $_ } }
+    Info "Repo a jour (fetch OK)"
 } else {
     Info "Clonage du repo..."
     $parentDir = Split-Path $REPO_DIR
