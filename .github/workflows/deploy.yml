@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Cible"
+        required: true
+        default: "linux-bare-metal"
+        type: choice
+        options:
+          - linux-bare-metal
+          - windows-wsl2
+      confirm:
+        description: "Taper DEPLOY pour confirmer"
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.event.inputs.target }}
+    runs-on: ubuntu-24.04
+    if: github.event.inputs.confirm == 'DEPLOY' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Linux bare metal
+        if: github.event.inputs.target == 'linux-bare-metal'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              ${DEPLOY_USER}@${DEPLOY_HOST} \
+              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d && docker compose ps'
+
+      - name: Deploy Windows WSL2
+        if: github.event.inputs.target == 'windows-wsl2'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY_WIN }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST_WIN }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER_WIN }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key_win
+          chmod 600 ~/.ssh/deploy_key_win
+          ssh -i ~/.ssh/deploy_key_win \
+              -p 2222 \
+              -o StrictHostKeyChecking=no \
+              ${DEPLOY_USER}@${DEPLOY_HOST_WIN} \
+              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d'

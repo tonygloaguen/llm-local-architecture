@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-bash:
+    name: Lint bash scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint bootstrap.sh
+        run: shellcheck bootstrap.sh
+
+      - name: Lint recheck.sh (si présent)
+        run: |
+          if [ -f recheck.sh ]; then
+            shellcheck recheck.sh
+          fi
+
+      - name: Validate JSON
+        run: |
+          find . -name "*.json" ! -path "./.git/*" | while read -r f; do
+            echo "Validating $f"
+            python3 -m json.tool "$f" > /dev/null
+          done
+
+  validate-docker:
+    name: Validate Docker Compose
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet

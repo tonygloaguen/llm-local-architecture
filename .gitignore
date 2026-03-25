@@ -1,0 +1,26 @@
+# Logs
+*.log
+logs/
+
+# Manifest local (hashes spécifiques à la machine)
+.llm-local/
+
+# Backups
+*.bak
+
+# Secrets
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
