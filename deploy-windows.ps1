@@ -424,8 +424,17 @@ print("OK:OCR_RUNTIME")
 '@
 
     $env:OCR_TESSERACT_CMD = $script:TesseractPath
-    $output = @(& $script:PythonVenvPython -c $pythonSnippet 2>&1)
-    $exitCode = $LASTEXITCODE
+
+    $tempPy = Join-Path $env:TEMP ("ocr_runtime_check_{0}.py" -f ([guid]::NewGuid().ToString("N")))
+    $pythonSnippet | Set-Content -Path $tempPy -Encoding UTF8
+
+    try {
+        $output = @(& $script:PythonVenvPython $tempPy 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Remove-Item $tempPy -ErrorAction SilentlyContinue
+    }
 
     if ($exitCode -ne 0) {
         $script:OcrPythonModulesStatus = "ERROR"
@@ -1393,3 +1402,4 @@ if ($LaunchApp) {
     Set-Location $REPO_DIR
     Start-FastApiApp
 }
+
