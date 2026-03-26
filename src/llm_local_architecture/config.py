@@ -8,6 +8,10 @@ from typing import Any
 
 # URL de base Ollama — configurable via variable d'environnement
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY: bool = (
+    os.getenv("OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY", "1") != "0"
+)
+OLLAMA_GENERATE_KEEP_ALIVE: str = os.getenv("OLLAMA_GENERATE_KEEP_ALIVE", "0")
 
 # Port de l'API orchestrateur
 ORCHESTRATOR_PORT: int = int(os.getenv("ORCHESTRATOR_PORT", "8001"))

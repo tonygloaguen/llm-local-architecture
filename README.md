@@ -132,6 +132,35 @@ Lancement via script :
 .\deploy-windows.ps1 -LaunchApp
 ```
 
+### Stratégie GPU Windows 11 / RTX 5060 8 Go
+
+Sur une machine Windows équipée d’une RTX 5060 8 Go, le point de vigilance principal n’est pas le routage mais la résidence mémoire côté Ollama.
+
+Plusieurs modèles 7B peuvent tenir individuellement en VRAM, mais leur cohabitation provoque vite :
+
+- éviction partielle vers le CPU
+- latence très variable
+- débit instable selon l’ordre des appels
+
+L’orchestrateur applique donc une stratégie stricte de résidence unique :
+
+- un seul modèle chargé à la fois
+- lecture de `ollama ps` avant exécution
+- arrêt automatique des autres modèles avant chaque génération
+- exécution avec `keep_alive=0` pour éviter qu’un modèle reste résident après la réponse
+- logs explicites sur le modèle sélectionné, `ollama ps` avant purge, après purge et après génération
+
+Cette stratégie est activée par défaut via :
+
+- `OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY=1`
+- `OLLAMA_GENERATE_KEEP_ALIVE=0`
+
+Pour diagnostiquer un fallback CPU ou une latence anormale sous Windows, vérifier d’abord :
+
+- `ollama ps`
+- l’usage VRAM dans le panneau NVIDIA
+- les logs FastAPI de l’orchestrateur
+
 Dans les deux cas, ouvrir ensuite `http://127.0.0.1:8001`.
 État réel du projet
 

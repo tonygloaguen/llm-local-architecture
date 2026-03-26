@@ -18,6 +18,7 @@ Endpoints disponibles :
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 import sys
 from typing import Any
@@ -28,7 +29,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import DEFAULT_MODEL, OLLAMA_BASE_URL, ORCHESTRATOR_PORT, STATIC_DIR
+from .config import (
+    DEFAULT_MODEL,
+    OLLAMA_BASE_URL,
+    OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY,
+    OLLAMA_GENERATE_KEEP_ALIVE,
+    ORCHESTRATOR_PORT,
+    STATIC_DIR,
+)
 from .documents import determine_input_type, process_document_bytes
 from .memory import (
     build_memory_bundle,
@@ -47,6 +55,8 @@ app = FastAPI(
     version="0.1.0",
     description="Routeur déterministe vers les modèles Ollama locaux.",
 )
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -219,7 +229,12 @@ async def _call_ollama(
     try:
         resp = await client.post(
             "/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "keep_alive": OLLAMA_GENERATE_KEEP_ALIVE,
+            },
         )
         if resp.status_code == 404:  # noqa: PLR2004
             return None
@@ -229,15 +244,103 @@ async def _call_ollama(
         return None
 
 
+async def _list_loaded_models(client: httpx.AsyncClient) -> list[str]:
+    """Retourne les modèles actuellement résidents dans Ollama."""
+    try:
+        resp = await client.get("/api/ps")
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Impossible de lire l'état de ollama ps sur {OLLAMA_BASE_URL} : {exc}",
+        ) from exc
+
+    payload = resp.json()
+    models = payload.get("models", [])
+    if not isinstance(models, list):
+        return []
+
+    loaded_models: list[str] = []
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or entry.get("model")
+        if isinstance(name, str) and name:
+            loaded_models.append(name)
+    return loaded_models
+
+
+def _format_loaded_models(models: list[str]) -> str:
+    """Formate l'état de `ollama ps` pour les logs."""
+    if not models:
+        return "<none>"
+    return ", ".join(models)
+
+
+async def _stop_model(client: httpx.AsyncClient, model: str) -> None:
+    """Décharge un modèle d'Ollama pour libérer la VRAM."""
+    try:
+        resp = await client.post("/api/generate", json={"model": model, "keep_alive": 0})
+        if resp.status_code == 404:  # noqa: PLR2004
+            return
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Impossible de décharger le modèle {model} sur {OLLAMA_BASE_URL} : {exc}",
+        ) from exc
+
+
+async def _prepare_model_execution(client: httpx.AsyncClient, selected_model: str) -> None:
+    """Garantit qu'un seul modèle est résident avant génération."""
+    loaded_models = await _list_loaded_models(client)
+    logger.info(
+        "Ollama selected_model=%s ps_before=%s",
+        selected_model,
+        _format_loaded_models(loaded_models),
+    )
+
+    if OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY:
+        stale_models = [model for model in loaded_models if model != selected_model]
+        for stale_model in stale_models:
+            logger.info("Ollama stopping stale model=%s before selected_model=%s", stale_model, selected_model)
+            await _stop_model(client, stale_model)
+
+    updated_models = await _list_loaded_models(client)
+    logger.info(
+        "Ollama selected_model=%s ps_after_cleanup=%s",
+        selected_model,
+        _format_loaded_models(updated_models),
+    )
+
+
+async def _run_model_generation(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model: str,
+) -> str | None:
+    """Prépare l'exécution d'un modèle puis journalise l'état final."""
+    await _prepare_model_execution(client, model)
+    response_text = await _call_ollama(client, prompt, model)
+    loaded_models = await _list_loaded_models(client)
+    logger.info(
+        "Ollama selected_model=%s ps_after_generate=%s generation_status=%s",
+        model,
+        _format_loaded_models(loaded_models),
+        "ok" if response_text is not None else "missing_or_unreachable",
+    )
+    return response_text
+
+
 async def _generate_with_fallback(prompt: str, selected_model: str) -> tuple[str, str, bool]:
     """Génère une réponse avec fallback éventuel sur le modèle par défaut."""
     async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=120.0) as client:
-        response_text = await _call_ollama(client, prompt, selected_model)
+        response_text = await _run_model_generation(client, prompt, selected_model)
         if response_text is not None:
             return response_text, selected_model, False
 
         if selected_model != DEFAULT_MODEL:
-            fallback_text = await _call_ollama(client, prompt, DEFAULT_MODEL)
+            fallback_text = await _run_model_generation(client, prompt, DEFAULT_MODEL)
             if fallback_text is not None:
                 return fallback_text, DEFAULT_MODEL, True
             raise HTTPException(
