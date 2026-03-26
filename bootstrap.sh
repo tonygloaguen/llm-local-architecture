@@ -18,15 +18,12 @@ APPROVE_CANDIDATES=false
 CHECK_REMOTE_UPDATES=false
 SETUP_PYTHON_ENV=false
 LAUNCH_APP=false
-APP_VENV_CREATED=false
 PYTHON_VENV_STATUS="ABSENT"
 PYTHON_DEPS_STATUS="À installer"
-APP_LAUNCH_STATUS="NON LANCÉE"
 APP_URL="http://127.0.0.1:8001"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${REPO_DIR}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python"
-PYTHON_BOOTSTRAP_OK=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
