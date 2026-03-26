@@ -532,6 +532,7 @@ foreach ($model in $MODELS) {
         Err "     Detail : $($_.Exception.Message)"
         $countFail++
     }
+}
 
 Info "Modeles : $countOK OK, $countFail echecs"
 
