@@ -6,6 +6,8 @@
 #   bash bootstrap.sh --check-by-pull
 #   bash bootstrap.sh --auto-update --approve-candidates
 #   bash bootstrap.sh --force-update
+#   bash bootstrap.sh --setup-python-env
+#   bash bootstrap.sh --setup-python-env --launch-app
 # =============================================================================
 set -euo pipefail
 
@@ -14,6 +16,17 @@ AUTO_UPDATE=false
 FORCE_UPDATE=false
 APPROVE_CANDIDATES=false
 CHECK_REMOTE_UPDATES=false
+SETUP_PYTHON_ENV=false
+LAUNCH_APP=false
+APP_VENV_CREATED=false
+PYTHON_VENV_STATUS="ABSENT"
+PYTHON_DEPS_STATUS="À installer"
+APP_LAUNCH_STATUS="NON LANCÉE"
+APP_URL="http://127.0.0.1:8001"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${REPO_DIR}/.venv"
+VENV_PYTHON="${VENV_DIR}/bin/python"
+PYTHON_BOOTSTRAP_OK=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,6 +45,12 @@ while [[ $# -gt 0 ]]; do
     --check-remote-updates)
       CHECK_REMOTE_UPDATES=true
       ;;
+    --setup-python-env)
+      SETUP_PYTHON_ENV=true
+      ;;
+    --launch-app)
+      LAUNCH_APP=true
+      ;;
     -h|--help)
       cat <<'EOF'
 Usage: bash bootstrap.sh [options]
@@ -42,6 +61,8 @@ Options:
   --force-update          Force un pull même si le modèle est déjà présent.
   --approve-candidates    Approuve explicitement les modèles candidate/drifted/trusted.
   --check-remote-updates  Vérifie le digest distant via https://ollama.com/api si OLLAMA_API_KEY est défini.
+  --setup-python-env      Crée .venv, met à jour pip et installe pip install -e ".[dev]".
+  --launch-app            Lance FastAPI via .venv/bin/python -m uvicorn ... --port 8001.
 EOF
       exit 0
       ;;
@@ -88,6 +109,74 @@ TESSERACT_STATUS="ABSENT"
 TESSERACT_PATH_DISPLAY="non détecté"
 TESSERACT_LANGS_DISPLAY="aucune"
 TESSERACT_IMPACT="OCR image / PDF scanné indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
+
+update_python_status() {
+  if [[ -x "${VENV_PYTHON}" ]]; then
+    PYTHON_VENV_STATUS="OK"
+    if "${VENV_PYTHON}" -m pip show llm-local-architecture >/dev/null 2>&1; then
+      PYTHON_DEPS_STATUS="OK"
+    else
+      PYTHON_DEPS_STATUS="À installer"
+    fi
+  else
+    PYTHON_VENV_STATUS="ABSENT"
+    PYTHON_DEPS_STATUS="À installer"
+  fi
+}
+
+setup_python_env() {
+  local python_cmd=""
+
+  step "ÉTAPE PY — Préparation de l'environnement Python"
+  if [[ ! -d "${VENV_DIR}" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python_cmd="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+      python_cmd="$(command -v python)"
+    else
+      error "Python introuvable. Installez Python 3.11+ puis relancez avec --setup-python-env."
+      exit 1
+    fi
+
+    info "Création du virtualenv : ${VENV_DIR}"
+    "${python_cmd}" -m venv "${VENV_DIR}"
+    APP_VENV_CREATED=true
+  else
+    info "Virtualenv déjà présent : ${VENV_DIR}"
+  fi
+
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    error "Python du virtualenv introuvable : ${VENV_PYTHON}"
+    exit 1
+  fi
+
+  info "Mise à jour de pip dans ${VENV_DIR}"
+  "${VENV_PYTHON}" -m pip install --upgrade pip
+  info 'Installation editable : pip install -e ".[dev]"'
+  "${VENV_PYTHON}" -m pip install -e ".[dev]"
+  PYTHON_BOOTSTRAP_OK=true
+  update_python_status
+}
+
+launch_app() {
+  step "ÉTAPE APP — Lancement FastAPI local"
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    if [[ "${SETUP_PYTHON_ENV}" == "true" ]]; then
+      error "Le virtualenv reste indisponible après --setup-python-env."
+      exit 1
+    fi
+    error "Virtualenv absent. Relancez avec --setup-python-env ou créez ${VENV_DIR} avant --launch-app."
+    exit 1
+  fi
+
+  if [[ "${PYTHON_DEPS_STATUS}" != "OK" ]]; then
+    warn "Dépendances Python non confirmées dans ${VENV_DIR}. L'application peut échouer au démarrage."
+  fi
+
+  info "Lancement FastAPI sur ${APP_URL}"
+  APP_LAUNCH_STATUS="LANCÉE"
+  exec "${VENV_PYTHON}" -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+}
 
 log() {
   local level="$1"
@@ -552,7 +641,9 @@ info "Log : ${LOGFILE}"
 info "Machine : ${HOSTNAME_VAL}"
 info "Ollama host : ${OLLAMA_HOST}"
 info "Répertoire Ollama détecté : ${OLLAMA_MODELS_DIR}"
-info "check_by_pull=${CHECK_BY_PULL} auto_update=${AUTO_UPDATE} force_update=${FORCE_UPDATE} approve_candidates=${APPROVE_CANDIDATES} check_remote_updates=${CHECK_REMOTE_UPDATES}"
+update_python_status
+info "Repo : ${REPO_DIR}"
+info "check_by_pull=${CHECK_BY_PULL} auto_update=${AUTO_UPDATE} force_update=${FORCE_UPDATE} approve_candidates=${APPROVE_CANDIDATES} check_remote_updates=${CHECK_REMOTE_UPDATES} setup_python_env=${SETUP_PYTHON_ENV} launch_app=${LAUNCH_APP}"
 
 step "ÉTAPE 1 — Vérification des prérequis"
 command -v ollama >/dev/null 2>&1 || { error "ollama introuvable dans PATH."; exit 1; }
@@ -943,6 +1034,12 @@ else
   warn "Cron non trouvé — vérifier : crontab -l"
 fi
 
+if [[ "${SETUP_PYTHON_ENV}" == "true" ]]; then
+  setup_python_env
+else
+  update_python_status
+fi
+
 step "ÉTAPE 7 — Rapport final"
 
 echo ""
@@ -961,12 +1058,20 @@ echo "    Chemin    : ${TESSERACT_PATH_DISPLAY}"
 echo "    Langues   : ${TESSERACT_LANGS_DISPLAY}"
 echo "    Impact    : ${TESSERACT_IMPACT}"
 echo ""
+echo "  Python :"
+echo "    Virtualenv       : ${PYTHON_VENV_STATUS}"
+echo "    Dépendances      : ${PYTHON_DEPS_STATUS}"
+echo "    Python du venv   : ${VENV_PYTHON}"
+echo "    FastAPI locale   : ${APP_URL}"
+echo ""
 echo "  Options :"
 echo "    --check-by-pull      ${CHECK_BY_PULL}"
 echo "    --auto-update        ${AUTO_UPDATE}"
 echo "    --force-update       ${FORCE_UPDATE}"
 echo "    --approve-candidates ${APPROVE_CANDIDATES}"
 echo "    --check-remote-updates ${CHECK_REMOTE_UPDATES}"
+echo "    --setup-python-env  ${SETUP_PYTHON_ENV}"
+echo "    --launch-app        ${LAUNCH_APP}"
 echo ""
 echo "  Résumé :"
 echo "    trusted     : ${COUNT_TRUSTED}"
@@ -978,6 +1083,14 @@ echo "    pull_failed : ${COUNT_PULL_FAILED}"
 echo "    installed   : ${COUNT_INSTALLED}"
 echo "    updated     : ${COUNT_UPDATED}"
 echo ""
+echo "  Usage principal :"
+echo "    FastAPI locale : ${APP_URL}"
+echo "    Open WebUI     : optionnel"
+echo ""
+
+if [[ "${LAUNCH_APP}" == "true" ]]; then
+  launch_app
+fi
 echo "  États par modèle :"
 while IFS= read -r model_json; do
   [[ -z "${model_json}" ]] && continue

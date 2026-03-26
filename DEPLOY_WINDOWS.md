@@ -33,7 +33,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 # 3. Télécharger et lancer le script de déploiement
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tonygloaguen/llm-local-architecture/main/deploy-windows.ps1" `
     -OutFile "$env:TEMP\deploy-windows.ps1"
-.\$env:TEMP\deploy-windows.ps1
+.\$env:TEMP\deploy-windows.ps1 -SetupPythonEnv
 ```
 
 Ou depuis un clone local :
@@ -41,7 +41,7 @@ Ou depuis un clone local :
 ```powershell
 git clone https://github.com/tonygloaguen/llm-local-architecture.git
 cd llm-local-architecture
-.\deploy-windows.ps1
+.\deploy-windows.ps1 -SetupPythonEnv
 ```
 
 ---
@@ -59,10 +59,12 @@ cd llm-local-architecture
 9. Met à jour le registre approuvé uniquement avec `-ApproveCandidates`
 10. Si Docker Desktop est installé, lance Open WebUI avec `docker compose --profile webui-only up -d`
 11. Vérifie la présence de Tesseract OCR et rappelle son impact fonctionnel s’il est absent
+12. Optionnellement, prépare `.venv` et installe `pip install -e ".[dev]"` avec `-SetupPythonEnv`
+13. Optionnellement, lance FastAPI locale avec `-LaunchApp`
 
 ---
 
-## Options de mise à jour
+## Options
 
 ```powershell
 # Check standard : aucun pull si le modèle exact existe déjà
@@ -82,6 +84,15 @@ cd llm-local-architecture
 
 # Check distant optionnel si OLLAMA_API_KEY est défini
 .\deploy-windows.ps1 -CheckRemoteUpdates
+
+# Prépare aussi le virtualenv Python du projet
+.\deploy-windows.ps1 -SetupPythonEnv
+
+# Prépare le virtualenv puis lance l'application FastAPI locale
+.\deploy-windows.ps1 -SetupPythonEnv -LaunchApp
+
+# Lance seulement l'application si .venv existe déjà
+.\deploy-windows.ps1 -LaunchApp
 ```
 
 Comportement :
@@ -91,6 +102,9 @@ Comportement :
 - `-AutoUpdate` et `-ForceUpdate` autorisent un pull sur un modèle déjà installé, mais ne l'approuvent jamais automatiquement.
 - Si le contenu d'un modèle approuvé change, il repasse hors `trusted` et doit être validé explicitement avec `-ApproveCandidates`.
 - `-CheckRemoteUpdates` est purement optionnel. Sans `OLLAMA_API_KEY`, le script loggue le fallback et continue en mode local.
+- `-SetupPythonEnv` crée `.venv` si besoin, met à jour `pip` dans le venv et installe `pip install -e ".[dev]"`.
+- `-LaunchApp` lance `.\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001`.
+- Si `-LaunchApp` est utilisé sans `.venv`, le script affiche un message clair et demande de préparer l’environnement Python.
 - Pour Open WebUI sur Windows natif, le script utilise le profil Docker Compose `webui-only`.
 - Un simple `docker compose up -d` ne suffit pas avec ce repo, car tous les services sont placés sous profiles. Sans profil explicite, Docker retourne `no service selected`.
 - Le compose surcharge aussi le healthcheck embarqué d’Open WebUI avec un test HTTP simple sur `http://127.0.0.1:8080/`, pour éviter les faux `unhealthy` liés au parsing `jq` de l’image.
@@ -147,14 +161,29 @@ ollama run phi4-mini "Dis bonjour en une phrase"
 # API Ollama
 Invoke-RestMethod -Uri "http://localhost:11434/api/tags"
 
+# Préparer l'environnement Python du projet
+.\deploy-windows.ps1 -SetupPythonEnv
+
 # Lancement principal du projet ensuite
-uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+.\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
 
 # Vérifier les services Docker du profil Windows natif
 docker compose --profile webui-only config --services
 
 # Open WebUI optionnel (si Docker Desktop lancé)
 Start-Process "http://localhost:3000"
+```
+
+Routine quotidienne recommandée :
+
+```powershell
+.\deploy-windows.ps1 -LaunchApp
+```
+
+Ou sans repasser par le script :
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
 ```
 
 Commande Docker manuelle équivalente au script :
@@ -172,6 +201,8 @@ docker compose --profile webui-only up -d
 | Répertoire modèles | `/usr/share/ollama/.ollama/models` | `%USERPROFILE%\.ollama\models` |
 | Service Ollama | systemd | Process en tâche de fond |
 | Script bootstrap | `bash bootstrap.sh` | `.\deploy-windows.ps1` |
+| Préparation Python | `bash bootstrap.sh --setup-python-env` | `.\deploy-windows.ps1 -SetupPythonEnv` |
+| Lancement app | `bash bootstrap.sh --launch-app` | `.\deploy-windows.ps1 -LaunchApp` |
 | Recheck intégrité | cron 07h00 | Tâche planifiée Windows (à créer) |
 | GPU | CUDA via driver natif | CUDA via driver natif |
 
@@ -234,5 +265,6 @@ gh secret set DEPLOY_USER_WIN --body "<user-windows>"
 | GPU non détecté par Ollama | Mettre à jour drivers NVIDIA (570+ requis pour RTX 5060) |
 | `Set-ExecutionPolicy` refusé | Lancer PowerShell en administrateur |
 | Pull modèle échoue | Vérifier connexion internet, relancer le script |
+| `-LaunchApp` échoue car `.venv` absent | Relancer avec `.\deploy-windows.ps1 -SetupPythonEnv` |
 | Docker compose échoue | Vérifier que Docker Desktop est lancé et WSL2 activé dans ses paramètres |
 | SSH refusé depuis GitHub Actions | Vérifier `authorized_keys` et que le service `sshd` tourne |

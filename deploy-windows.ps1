@@ -9,6 +9,8 @@
 #   .\deploy-windows.ps1 -AutoUpdate
 #   .\deploy-windows.ps1 -ForceUpdate
 #   .\deploy-windows.ps1 -CheckRemoteUpdates
+#   .\deploy-windows.ps1 -SetupPythonEnv
+#   .\deploy-windows.ps1 -SetupPythonEnv -LaunchApp
 # =============================================================================
 
 param(
@@ -16,11 +18,20 @@ param(
     [switch]$AutoUpdate,
     [switch]$ForceUpdate,
     [switch]$ApproveCandidates,
-    [switch]$CheckRemoteUpdates
+    [switch]$CheckRemoteUpdates,
+    [switch]$SetupPythonEnv,
+    [switch]$LaunchApp,
+    [Alias("h")]
+    [switch]$Help
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($Help) {
+    Show-Usage
+    exit 0
+}
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -52,6 +63,11 @@ $script:TesseractStatus = "ABSENT"
 $script:TesseractPath = $null
 $script:TesseractLanguages = @()
 $script:TesseractImpact = "OCR image / PDF scanne indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
+$script:PythonVenvDir = $null
+$script:PythonVenvPython = $null
+$script:PythonVenvStatus = "ABSENT"
+$script:PythonDepsStatus = "A installer"
+$script:FastApiUrl = "http://127.0.0.1:8001"
 
 # ---------------------------------------------------------------------------
 # FONCTIONS LOG
@@ -77,6 +93,22 @@ function Step {
     Write-Host "  $m"
     Write-Host "======================================================"
     Write-Log "STEP " $m
+}
+
+function Show-Usage {
+    @"
+Usage: .\deploy-windows.ps1 [options]
+
+Options:
+  -CheckByPull        Fait un pull controle et compare le digest avant/apres.
+  -AutoUpdate         Autorise la mise a jour par pull des modeles deja presents.
+  -ForceUpdate        Force un pull meme si le modele est deja present.
+  -ApproveCandidates  Approuve explicitement les modeles candidate/drifted/trusted.
+  -CheckRemoteUpdates Verifie le digest distant via https://ollama.com/api si OLLAMA_API_KEY est defini.
+  -SetupPythonEnv     Cree .venv, met a jour pip et installe pip install -e ".[dev]".
+  -LaunchApp          Lance FastAPI via .\.venv\Scripts\python.exe -m uvicorn ... --port 8001.
+  -Help               Affiche cette aide.
+"@
 }
 
 # ---------------------------------------------------------------------------
@@ -147,6 +179,109 @@ function Get-TesseractPath {
     }
 
     return $null
+}
+
+function Update-PythonStatus {
+    if (-not $script:PythonVenvDir) {
+        return
+    }
+
+    $venvPython = Join-Path $script:PythonVenvDir "Scripts\python.exe"
+    $script:PythonVenvPython = $venvPython
+
+    if (Test-Path $venvPython) {
+        $script:PythonVenvStatus = "OK"
+        try {
+            & $venvPython -m pip show llm-local-architecture *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $script:PythonDepsStatus = "OK"
+            } else {
+                $script:PythonDepsStatus = "A installer"
+            }
+        } catch {
+            $script:PythonDepsStatus = "A installer"
+        }
+    } else {
+        $script:PythonVenvStatus = "ABSENT"
+        $script:PythonDepsStatus = "A installer"
+    }
+}
+
+function Get-PreferredPythonForVenvCreation {
+    $candidates = @("py", "python", "python3")
+    foreach ($candidate in $candidates) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $cmd.Source
+        }
+    }
+
+    return $null
+}
+
+function Setup-PythonEnvironment {
+    Step "ETAPE PY - Preparation de l'environnement Python"
+
+    if (-not (Test-Path $script:PythonVenvDir)) {
+        $pythonCmd = Get-PreferredPythonForVenvCreation
+        if (-not $pythonCmd) {
+            Err "Python introuvable. Installer Python 3.11+ puis relancer avec -SetupPythonEnv."
+            exit 1
+        }
+
+        Info "Creation du virtualenv : $script:PythonVenvDir"
+        & $pythonCmd -m venv $script:PythonVenvDir
+        if ($LASTEXITCODE -ne 0) {
+            Err "Creation du virtualenv echouee"
+            exit 1
+        }
+    } else {
+        Info "Virtualenv deja present : $script:PythonVenvDir"
+    }
+
+    Update-PythonStatus
+    if (-not (Test-Path $script:PythonVenvPython)) {
+        Err "Python du virtualenv introuvable : $script:PythonVenvPython"
+        exit 1
+    }
+
+    Info "Mise a jour de pip dans le virtualenv"
+    & $script:PythonVenvPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) {
+        Err "Mise a jour de pip echouee"
+        exit 1
+    }
+
+    Info 'Installation editable : pip install -e ".[dev]"'
+    & $script:PythonVenvPython -m pip install -e ".[dev]"
+    if ($LASTEXITCODE -ne 0) {
+        Err "Installation Python echouee"
+        exit 1
+    }
+
+    Update-PythonStatus
+}
+
+function Start-FastApiApp {
+    Step "ETAPE APP - Lancement FastAPI local"
+
+    Update-PythonStatus
+    if (-not (Test-Path $script:PythonVenvPython)) {
+        if ($SetupPythonEnv) {
+            Err "Le virtualenv reste indisponible apres -SetupPythonEnv."
+        } else {
+            Err "Virtualenv absent. Relancer avec -SetupPythonEnv ou creer .venv avant -LaunchApp."
+        }
+        exit 1
+    }
+
+    if ($script:PythonDepsStatus -ne "OK") {
+        Warn "Dependances Python non confirmees dans le virtualenv. Le lancement peut echouer."
+    }
+
+    Info "Lancement FastAPI sur $script:FastApiUrl"
+    & $script:PythonVenvPython -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+    exit $LASTEXITCODE
 }
 
 function Get-TesseractLanguages {
@@ -567,6 +702,8 @@ Info "AutoUpdate : $AutoUpdate"
 Info "ForceUpdate : $ForceUpdate"
 Info "ApproveCandidates : $ApproveCandidates"
 Info "CheckRemoteUpdates : $CheckRemoteUpdates"
+Info "SetupPythonEnv : $SetupPythonEnv"
+Info "LaunchApp : $LaunchApp"
 
 # ---------------------------------------------------------------------------
 # ETAPE 1 - VERIFICATION GPU NVIDIA
@@ -696,6 +833,9 @@ if (Test-Path (Join-Path $REPO_DIR ".git")) {
 }
 
 Info "Repo a jour : $REPO_DIR"
+$script:PythonVenvDir = Join-Path $REPO_DIR ".venv"
+$script:PythonVenvPython = Join-Path $script:PythonVenvDir "Scripts\python.exe"
+Update-PythonStatus
 
 # ---------------------------------------------------------------------------
 # ETAPE 5 - TELECHARGEMENT DES MODELES
@@ -989,6 +1129,13 @@ if (Test-Cmd "docker") {
     Info "Ollama accessible sur http://localhost:11434"
 }
 
+if ($SetupPythonEnv) {
+    Set-Location $REPO_DIR
+    Setup-PythonEnvironment
+} else {
+    Update-PythonStatus
+}
+
 # ---------------------------------------------------------------------------
 # RAPPORT FINAL
 # ---------------------------------------------------------------------------
@@ -1012,6 +1159,12 @@ Write-Host "    Chemin    : $(if ($script:TesseractPath) { $script:TesseractPath
 Write-Host "    Langues   : $(if ($script:TesseractLanguages.Count -gt 0) { $script:TesseractLanguages -join ', ' } else { 'aucune' })"
 Write-Host "    Impact    : $script:TesseractImpact"
 Write-Host ""
+Write-Host "  PYTHON :"
+Write-Host "    Virtualenv       : $script:PythonVenvStatus"
+Write-Host "    Dependances      : $script:PythonDepsStatus"
+Write-Host "    Python du venv   : $(if ($script:PythonVenvPython) { $script:PythonVenvPython } else { 'non detecte' })"
+Write-Host "    FastAPI locale   : $script:FastApiUrl"
+Write-Host ""
 Write-Host "  MODELES CIBLES :"
 foreach ($model in $MODELS) {
     Write-Host "    -> $model"
@@ -1029,8 +1182,22 @@ if (Test-Cmd "docker") {
     Write-Host "    Open WebUI optionnel : http://localhost:3000"
 }
 Write-Host ""
+Write-Host "  OPTIONS :"
+Write-Host "    -CheckByPull        $CheckByPull"
+Write-Host "    -AutoUpdate         $AutoUpdate"
+Write-Host "    -ForceUpdate        $ForceUpdate"
+Write-Host "    -ApproveCandidates  $ApproveCandidates"
+Write-Host "    -CheckRemoteUpdates $CheckRemoteUpdates"
+Write-Host "    -SetupPythonEnv     $SetupPythonEnv"
+Write-Host "    -LaunchApp          $LaunchApp"
+Write-Host ""
 Write-Host "  TEST RAPIDE :"
 Write-Host '    ollama run phi4-mini "Dis bonjour en une phrase"'
 Write-Host ""
 
 Info "Deploiement Windows termine"
+
+if ($LaunchApp) {
+    Set-Location $REPO_DIR
+    Start-FastApiApp
+}

@@ -23,32 +23,32 @@ Le projet ne fournit pas encore :
 
 ## À lire d’abord
 
-Il y a deux moments distincts dans la vie du projet :
+L’interface principale du projet est l’application FastAPI locale :
 
-### 1. Première installation
+- URL locale : `http://127.0.0.1:8001`
+- lancement : `uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001`
+- Open WebUI via Docker : optionnel
 
-Si tu pars d’une machine où Ollama n’est pas encore prêt, le premier geste n’est **pas** de lancer FastAPI.
+Il y a maintenant trois moments distincts dans la vie du projet :
 
-Le premier geste est :
+1. Préparer le runtime local des modèles.
+2. Préparer l’environnement Python du repo.
+3. Lancer FastAPI au quotidien.
 
-- **Linux** : exécuter `bootstrap.sh`
-- **Windows** : exécuter `deploy-windows.ps1`
+### 1. Préparer le runtime local des modèles
 
-Ces scripts servent à préparer la couche runtime locale des modèles :
-- installation / préparation d’Ollama selon le système
-- téléchargement des modèles locaux
-- vérifications associées
-- vérification OCR Tesseract, avec tentative d’installation quand c’est raisonnable
-- préparation de l’environnement local nécessaire
+Les scripts racine servent d’abord à préparer Ollama, les modèles et l’OCR :
 
-Modes de contrôle disponibles pour les scripts de déploiement :
+- Linux : `bash bootstrap.sh`
+- Windows : `.\deploy-windows.ps1`
 
-- Check standard : ne fait pas de `pull` si le modèle exact est déjà présent localement.
-- Check by pull : fait un `pull` contrôlé et compare le digest avant/après pour détecter une mise à jour sans dépendre d’une API key.
-- Auto update : autorise la mise à jour des modèles déjà présents via `pull`, sans approbation automatique.
-- Force update : force un `pull` même si le modèle est déjà présent.
-- Approve candidates : écrit explicitement dans le registre approuvé après validation humaine.
-- Remote check : optionnel, nécessite `OLLAMA_API_KEY` pour comparer le digest local au digest distant via `https://ollama.com/api`.
+Ils gèrent :
+
+- l’installation ou la vérification d’Ollama selon la plateforme
+- le téléchargement contrôlé des modèles
+- les vérifications d’intégrité et d’approbation
+- la vérification OCR Tesseract
+- Open WebUI via Docker en option
 
 États exposés par modèle :
 
@@ -56,98 +56,83 @@ Modes de contrôle disponibles pour les scripts de déploiement :
 - `trust_state` : `trusted`, `candidate`, `drifted`, `quarantine`, `missing`
 - `update_state` : `up_to_date`, `updated`, `update_unknown`
 
-Ensuite seulement tu prépares l’environnement Python du projet.
+### 2. Préparer l’environnement Python
 
-Important pour la première installation :
+Le package Python du projet est défini dans `pyproject.toml`.
 
-- l’interface d’usage principal est l’application FastAPI locale du repo
-- Open WebUI via Docker est optionnel
-- Tesseract est recommandé pour l’OCR des images et PDF scannés
-- sans Tesseract, le projet reste utilisable pour le texte, les PDF texte et les fichiers texte simples
+Les scripts principaux savent maintenant aussi préparer `.venv` :
 
-### 2. Routine normale ensuite
+- Linux : `bash bootstrap.sh --setup-python-env`
+- Windows : `.\deploy-windows.ps1 -SetupPythonEnv`
 
-Une fois la machine préparée et les modèles déjà présents localement :
-- tu actives le virtualenv
-- tu lances FastAPI
-- tu ouvres l’interface web locale
+Cette étape :
 
-En routine, tu n’as pas à relancer le bootstrap des modèles à chaque fois.
+- crée `.venv` si absent
+- met à jour `pip` dans le virtualenv
+- installe `pip install -e ".[dev]"`
+
+### 3. Lancer FastAPI au quotidien
+
+Lancement direct :
+
+- Linux : `.venv/bin/python -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001`
+- Windows : `.\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001`
+
+Ou via les nouvelles options :
+
+- Linux : `bash bootstrap.sh --launch-app`
+- Windows : `.\deploy-windows.ps1 -LaunchApp`
+
+Si `.venv` n’existe pas encore :
+
+- Linux : `bash bootstrap.sh --setup-python-env --launch-app`
+- Windows : `.\deploy-windows.ps1 -SetupPythonEnv -LaunchApp`
+
+En routine, il n’est pas nécessaire de relancer le bootstrap des modèles à chaque session.
 
 ## Déploiement guidé selon le système
 
-## Linux
+### Linux
 
-### Étape 1 — préparer Ollama et les modèles
-
-Depuis la racine du repo :
+Préparation complète :
 
 ```bash
-bash bootstrap.sh
+bash bootstrap.sh --setup-python-env
+```
 
-Ce script correspond à la couche runtime locale des modèles, pas à l’application FastAPI elle-même.
+Lancement quotidien :
 
-Étape 2 — préparer l’environnement Python
+```bash
+.venv/bin/python -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+```
 
-Créer le virtualenv :
+Lancement via script :
 
-python3 -m venv .venv
+```bash
+bash bootstrap.sh --launch-app
+```
 
-Activer le virtualenv :
+### Windows 11
 
-source .venv/bin/activate
+Préparation complète :
 
-Installer le projet :
+```powershell
+.\deploy-windows.ps1 -SetupPythonEnv
+```
 
-pip install -e ".[dev]"
-Étape 3 — lancer l’application
-uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+Lancement quotidien :
 
-Puis ouvrir :
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+```
 
-http://127.0.0.1:8001
-Windows 11
-Étape 1 — préparer Ollama et les modèles
+Lancement via script :
 
-Depuis la racine du repo, dans PowerShell :
+```powershell
+.\deploy-windows.ps1 -LaunchApp
+```
 
-.\deploy-windows.ps1
-
-Ce script correspond à la couche runtime locale des modèles, pas à l’application FastAPI elle-même.
-
-Étape 2 — préparer l’environnement Python
-
-Créer le virtualenv :
-
-python -m venv .venv
-
-Activer le virtualenv :
-
-.\.venv\Scripts\Activate.ps1
-
-Installer le projet :
-
-python -m pip install -e ".[dev]"
-Étape 3 — lancer l’application
-uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
-
-Puis ouvrir :
-
-http://127.0.0.1:8001
-Routine normale
-
-Quand tout est déjà installé sur la machine, le cycle normal est :
-
-Linux
-source .venv/bin/activate
-uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
-Windows
-.\.venv\Scripts\Activate.ps1
-uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
-
-Puis ouvrir :
-
-http://127.0.0.1:8001
+Dans les deux cas, ouvrir ensuite `http://127.0.0.1:8001`.
 État réel du projet
 
 Composants réellement présents dans le repo :
@@ -457,26 +442,22 @@ Scripts
 
 Le repo contient deux scripts principaux avec des rôles différents.
 
-bootstrap.sh
+`bootstrap.sh`
 
-Script orienté runtime local des modèles :
+- prépare le runtime local Ollama/modèles/OCR
+- peut aussi préparer `.venv` avec `--setup-python-env`
+- peut lancer FastAPI avec `--launch-app`
 
-téléchargement des modèles via Ollama
-vérifications d’intégrité
-génération de manifest et de fichiers associés
-logique de recheck côté machine locale
+`deploy-windows.ps1`
 
-Ce script correspond à la couche “modèles/Ollama”, pas à l’orchestrateur Python.
+- prépare le runtime local Ollama/modèles/OCR sur Windows natif
+- peut aussi préparer `.venv` avec `-SetupPythonEnv`
+- peut lancer FastAPI avec `-LaunchApp`
 
-scripts/bootstrap.sh
+`scripts/bootstrap.sh`
 
-Script orienté environnement Python du projet :
-
-création du virtualenv
-installation des dépendances Python
-
-Dans l’état actuel du repo, ce script doit être considéré séparément du bootstrap.sh racine.
-Il ne remplace pas le script de gestion des modèles.
+- reste un script séparé orienté environnement Python
+- ne remplace pas les scripts racine pour la gestion Ollama/modèles
 
 Déploiement Windows 11
 
