@@ -48,6 +48,11 @@ $MODELS = @(
     "mistral:7b-instruct-v0.3-q4_K_M"
 )
 
+$script:TesseractStatus = "ABSENT"
+$script:TesseractPath = $null
+$script:TesseractLanguages = @()
+$script:TesseractImpact = "OCR image / PDF scanne indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
+
 # ---------------------------------------------------------------------------
 # FONCTIONS LOG
 # ---------------------------------------------------------------------------
@@ -119,6 +124,81 @@ function Get-Sha256String {
     } finally {
         $sha.Dispose()
     }
+}
+
+function Get-TesseractPath {
+    $candidates = @()
+
+    $fromPath = Get-Command "tesseract.exe" -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        $candidates += $fromPath.Source
+    }
+
+    $candidates += @(
+        "C:\Program Files\Tesseract-OCR\tesseract.exe",
+        "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        (Join-Path $env:LOCALAPPDATA "Tesseract-OCR\tesseract.exe")
+    )
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Get-TesseractLanguages {
+    param([string]$TesseractCmd)
+
+    if (-not $TesseractCmd) {
+        return @()
+    }
+
+    try {
+        $lines = & $TesseractCmd --list-langs 2>$null
+        if (-not $lines) {
+            return @()
+        }
+
+        return @($lines | Select-Object -Skip 1 | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    } catch {
+        Warn "Impossible de lire les langues Tesseract : $($_.Exception.Message)"
+        return @()
+    }
+}
+
+function Initialize-TesseractStatus {
+    $script:TesseractPath = Get-TesseractPath
+
+    if ($script:TesseractPath) {
+        $script:TesseractStatus = "OK"
+        $script:TesseractLanguages = @(Get-TesseractLanguages -TesseractCmd $script:TesseractPath)
+        $env:TESSERACT_CMD = $script:TesseractPath
+
+        if ($script:TesseractLanguages -contains "eng" -and $script:TesseractLanguages -contains "fra") {
+            $script:TesseractImpact = "OCR pret pour eng et fra ; image / PDF scanne utilisables."
+        } elseif ($script:TesseractLanguages -contains "eng") {
+            $script:TesseractImpact = "OCR disponible avec eng ; installez fra pour un OCR francais plus fiable."
+        } else {
+            $script:TesseractImpact = "Tesseract detecte, mais le pack eng manque ; OCR a completer avant usage normal."
+        }
+
+        Info "Tesseract detecte : $script:TesseractPath"
+        if ($script:TesseractLanguages.Count -gt 0) {
+            Info "Langues Tesseract : $($script:TesseractLanguages -join ', ')"
+        } else {
+            Warn "Langues Tesseract non detectees"
+        }
+        Info "TESSERACT_CMD recommande pour cette session : $env:TESSERACT_CMD"
+        return
+    }
+
+    Warn "Tesseract absent sur cette machine Windows"
+    Warn "OCR image / PDF scanne indisponible tant que Tesseract n'est pas installe"
+    Warn "Installation recommandee : winget install --id UB-Mannheim.TesseractOCR -e"
+    Warn "Chemin attendu ensuite : C:\Program Files\Tesseract-OCR\tesseract.exe"
 }
 
 # ---------------------------------------------------------------------------
@@ -573,6 +653,12 @@ if (Test-Cmd "docker") {
 }
 
 # ---------------------------------------------------------------------------
+# ETAPE 3B - VERIFICATION OCR TESSERACT
+# ---------------------------------------------------------------------------
+Step "ETAPE 3B - Verification OCR Tesseract"
+Initialize-TesseractStatus
+
+# ---------------------------------------------------------------------------
 # ETAPE 4 - REPO
 # ---------------------------------------------------------------------------
 Step "ETAPE 4 - Repo llm-local-architecture"
@@ -920,6 +1006,12 @@ Write-Host "  Manifest courant  : $CURRENT_MANIFEST"
 Write-Host "  Registre approuve : $APPROVED_REGISTRY"
 Write-Host "  Log               : $LOGFILE"
 Write-Host ""
+Write-Host "  OCR :"
+Write-Host "    Tesseract : $script:TesseractStatus"
+Write-Host "    Chemin    : $(if ($script:TesseractPath) { $script:TesseractPath } else { 'non detecte' })"
+Write-Host "    Langues   : $(if ($script:TesseractLanguages.Count -gt 0) { $script:TesseractLanguages -join ', ' } else { 'aucune' })"
+Write-Host "    Impact    : $script:TesseractImpact"
+Write-Host ""
 Write-Host "  MODELES CIBLES :"
 foreach ($model in $MODELS) {
     Write-Host "    -> $model"
@@ -932,8 +1024,9 @@ foreach ($model in $currentManifest.models) {
 Write-Host ""
 Write-Host "  ACCES :"
 Write-Host "    Ollama API : http://localhost:11434"
+Write-Host "    FastAPI locale : http://127.0.0.1:8001 (usage principal du projet)"
 if (Test-Cmd "docker") {
-    Write-Host "    Open WebUI : http://localhost:3000"
+    Write-Host "    Open WebUI optionnel : http://localhost:3000"
 }
 Write-Host ""
 Write-Host "  TEST RAPIDE :"

@@ -3,6 +3,9 @@
 Ce guide explique comment déployer `llm-local-architecture` sur une machine Windows
 avec GPU NVIDIA, sans WSL2, en PowerShell natif.
 
+L’usage principal ensuite se fait via l’application FastAPI locale du repo.
+Open WebUI via Docker reste optionnel.
+
 ---
 
 ## Prérequis
@@ -13,6 +16,7 @@ avec GPU NVIDIA, sans WSL2, en PowerShell natif.
 | Git for Windows | https://git-scm.com/download/win | ✅ |
 | Drivers NVIDIA récents (570+) | https://www.nvidia.com/drivers | ✅ |
 | Docker Desktop | https://www.docker.com/products/docker-desktop | ⚠️ Pour Open WebUI uniquement |
+| Tesseract OCR | https://github.com/UB-Mannheim/tesseract/wiki | ⚠️ Recommandé pour images et PDF scannés |
 
 > Ollama s'installe automatiquement par le script si absent.
 
@@ -54,6 +58,7 @@ cd llm-local-architecture
 8. Génère le manifest courant dans `%USERPROFILE%\.llm-local\manifests\current_manifest.json`
 9. Met à jour le registre approuvé uniquement avec `-ApproveCandidates`
 10. Si Docker Desktop est installé, lance Open WebUI avec `docker compose --profile webui-only up -d`
+11. Vérifie la présence de Tesseract OCR et rappelle son impact fonctionnel s’il est absent
 
 ---
 
@@ -88,6 +93,16 @@ Comportement :
 - `-CheckRemoteUpdates` est purement optionnel. Sans `OLLAMA_API_KEY`, le script loggue le fallback et continue en mode local.
 - Pour Open WebUI sur Windows natif, le script utilise le profil Docker Compose `webui-only`.
 - Un simple `docker compose up -d` ne suffit pas avec ce repo, car tous les services sont placés sous profiles. Sans profil explicite, Docker retourne `no service selected`.
+- Le compose surcharge aussi le healthcheck embarqué d’Open WebUI avec un test HTTP simple sur `http://127.0.0.1:8080/`, pour éviter les faux `unhealthy` liés au parsing `jq` de l’image.
+- Si Tesseract est présent, le script recommande la valeur de `TESSERACT_CMD` pour la session courante.
+- Si Tesseract est absent, le déploiement continue : seul l’OCR image / PDF scanné reste indisponible.
+
+Fonctionnement sans Tesseract :
+
+- texte seul : OK
+- PDF texte : OK
+- `.txt`, `.md`, `.csv`, `.log`, `Dockerfile` : OK
+- image / PDF scanné : KO avec erreur explicite
 
 États visibles par modèle dans le manifest et le rapport final :
 
@@ -132,10 +147,13 @@ ollama run phi4-mini "Dis bonjour en une phrase"
 # API Ollama
 Invoke-RestMethod -Uri "http://localhost:11434/api/tags"
 
+# Lancement principal du projet ensuite
+uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
+
 # Vérifier les services Docker du profil Windows natif
 docker compose --profile webui-only config --services
 
-# Open WebUI (si Docker Desktop lancé)
+# Open WebUI optionnel (si Docker Desktop lancé)
 Start-Process "http://localhost:3000"
 ```
 

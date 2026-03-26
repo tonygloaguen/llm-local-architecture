@@ -84,6 +84,10 @@ COUNT_MISSING=0
 COUNT_PULL_FAILED=0
 COUNT_UPDATED=0
 COUNT_INSTALLED=0
+TESSERACT_STATUS="ABSENT"
+TESSERACT_PATH_DISPLAY="non détecté"
+TESSERACT_LANGS_DISPLAY="aucune"
+TESSERACT_IMPACT="OCR image / PDF scanné indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
 
 log() {
   local level="$1"
@@ -178,6 +182,89 @@ detect_ollama_base() {
     return
   fi
   echo "${HOME}/.ollama/models"
+}
+
+get_tesseract_languages() {
+  local tesseract_cmd="$1"
+  local langs=""
+
+  if langs=$("${tesseract_cmd}" --list-langs 2>/dev/null); then
+    echo "${langs}" | tail -n +2 | awk 'NF {print $1}'
+  fi
+}
+
+attempt_tesseract_install_linux() {
+  local packages=(tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra)
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    warn "Installation automatique Tesseract non tentee : apt-get indisponible"
+    warn "Commande recommandee : sudo apt-get update && sudo apt-get install -y ${packages[*]}"
+    return 1
+  fi
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    info "Tentative d'installation automatique de Tesseract via apt-get"
+    if apt-get update && apt-get install -y "${packages[@]}"; then
+      return 0
+    fi
+    warn "Installation automatique de Tesseract via apt-get echouee"
+    return 1
+  fi
+
+  if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    info "Tentative d'installation automatique de Tesseract via sudo apt-get"
+    if sudo apt-get update && sudo apt-get install -y "${packages[@]}"; then
+      return 0
+    fi
+    warn "Installation automatique de Tesseract via sudo apt-get echouee"
+    return 1
+  fi
+
+  warn "Tesseract absent et installation automatique non possible sans elevation"
+  warn "Commande recommandee : sudo apt-get update && sudo apt-get install -y ${packages[*]}"
+  return 1
+}
+
+check_tesseract_linux() {
+  local tesseract_cmd=""
+  local langs=()
+  local has_eng=false
+  local has_fra=false
+
+  if command -v tesseract >/dev/null 2>&1; then
+    tesseract_cmd="$(command -v tesseract)"
+  else
+    warn "Tesseract absent du PATH"
+    attempt_tesseract_install_linux || true
+    if command -v tesseract >/dev/null 2>&1; then
+      tesseract_cmd="$(command -v tesseract)"
+    fi
+  fi
+
+  if [[ -n "${tesseract_cmd}" ]]; then
+    mapfile -t langs < <(get_tesseract_languages "${tesseract_cmd}")
+    TESSERACT_STATUS="OK"
+    TESSERACT_PATH_DISPLAY="${tesseract_cmd}"
+    if [[ ${#langs[@]} -gt 0 ]]; then
+      TESSERACT_LANGS_DISPLAY="$(printf '%s, ' "${langs[@]}")"
+      TESSERACT_LANGS_DISPLAY="${TESSERACT_LANGS_DISPLAY%, }"
+    else
+      TESSERACT_LANGS_DISPLAY="langues non détectées"
+    fi
+
+    for lang in "${langs[@]}"; do
+      [[ "${lang}" == "eng" ]] && has_eng=true
+      [[ "${lang}" == "fra" ]] && has_fra=true
+    done
+
+    if [[ "${has_eng}" == "true" && "${has_fra}" == "true" ]]; then
+      TESSERACT_IMPACT="OCR prêt pour eng et fra ; image / PDF scanné utilisables."
+    elif [[ "${has_eng}" == "true" ]]; then
+      TESSERACT_IMPACT="OCR disponible avec eng ; installez fra pour un OCR français plus fiable."
+    else
+      TESSERACT_IMPACT="Tesseract détecté, mais le pack eng manque ; OCR à compléter avant usage normal."
+    fi
+  fi
 }
 
 OLLAMA_MODELS_DIR=$(detect_ollama_base)
@@ -477,6 +564,16 @@ info "Version Ollama : $(ollama --version 2>/dev/null || echo 'inconnue')"
 if ! test_ollama_api; then
   error "API Ollama inaccessible sur ${OLLAMA_HOST}"
   exit 1
+fi
+
+step "ÉTAPE 1B — Vérification OCR Tesseract"
+check_tesseract_linux
+if [[ "${TESSERACT_STATUS}" == "OK" ]]; then
+  info "Tesseract détecté : ${TESSERACT_PATH_DISPLAY}"
+  info "Langues Tesseract : ${TESSERACT_LANGS_DISPLAY}"
+else
+  warn "Tesseract absent"
+  warn "Les documents image / PDF scannés resteront indisponibles tant que Tesseract n'est pas installé"
 fi
 
 step "ÉTAPE 2 — Installation / mise à jour contrôlée des modèles"
@@ -857,6 +954,12 @@ echo "  Répertoire Ollama : ${OLLAMA_MODELS_DIR}"
 echo "  Manifest          : ${CURRENT_MANIFEST}"
 echo "  Registre approuvé : ${APPROVED_REGISTRY}"
 echo "  Log               : ${LOGFILE}"
+echo ""
+echo "  OCR :"
+echo "    Tesseract : ${TESSERACT_STATUS}"
+echo "    Chemin    : ${TESSERACT_PATH_DISPLAY}"
+echo "    Langues   : ${TESSERACT_LANGS_DISPLAY}"
+echo "    Impact    : ${TESSERACT_IMPACT}"
 echo ""
 echo "  Options :"
 echo "    --check-by-pull      ${CHECK_BY_PULL}"

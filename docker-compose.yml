@@ -54,6 +54,7 @@ services:
 
   # ─── Open WebUI — MODE 1 : dépend du service Ollama conteneurisé ─────────
   # Cette interface parle directement à Ollama, pas à l'orchestrateur Python.
+  # On surcharge le healthcheck de l'image pour éviter son parsing jq fragile.
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.6.5
     container_name: llm-webui
@@ -64,6 +65,12 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
       - webui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)\" >/dev/null 2>&1 || python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)\" >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     depends_on:
       ollama:
         condition: service_healthy
@@ -72,6 +79,7 @@ services:
 
   # ─── Open WebUI — MODE 2 : pointe vers Ollama natif de la machine hôte ───
   # Cette interface parle directement à Ollama, pas à l'orchestrateur Python.
+  # On surcharge le healthcheck de l'image pour éviter son parsing jq fragile.
   open-webui-native:
     image: ghcr.io/open-webui/open-webui:v0.6.5
     container_name: llm-webui-native
@@ -85,6 +93,12 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     volumes:
       - webui_data:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)\" >/dev/null 2>&1 || python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)\" >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles:

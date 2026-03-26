@@ -13,7 +13,7 @@ Le projet fournit aujourd’hui :
 - un pipeline documentaire local
 - un OCR local configurable
 - une mémoire locale persistante en SQLite
-- un `docker-compose` pour Ollama et Open WebUI
+- un `docker-compose` optionnel pour Ollama et Open WebUI
 
 Le projet ne fournit pas encore :
 - d’orchestration multi-étapes avancée
@@ -38,6 +38,7 @@ Ces scripts servent à préparer la couche runtime locale des modèles :
 - installation / préparation d’Ollama selon le système
 - téléchargement des modèles locaux
 - vérifications associées
+- vérification OCR Tesseract, avec tentative d’installation quand c’est raisonnable
 - préparation de l’environnement local nécessaire
 
 Modes de contrôle disponibles pour les scripts de déploiement :
@@ -56,6 +57,13 @@ Modes de contrôle disponibles pour les scripts de déploiement :
 - `update_state` : `up_to_date`, `updated`, `update_unknown`
 
 Ensuite seulement tu prépares l’environnement Python du projet.
+
+Important pour la première installation :
+
+- l’interface d’usage principal est l’application FastAPI locale du repo
+- Open WebUI via Docker est optionnel
+- Tesseract est recommandé pour l’OCR des images et PDF scannés
+- sans Tesseract, le projet reste utilisable pour le texte, les PDF texte et les fichiers texte simples
 
 ### 2. Routine normale ensuite
 
@@ -222,6 +230,7 @@ Comportement :
 PDF texte : extraction directe
 image / PDF scanné : OCR local si nécessaire
 texte simple : lecture directe sans OCR
+si Tesseract est absent : image / PDF scanné -> erreur explicite, sans impacter les autres formats
 6. Mémoire locale
 
 La mémoire persistante locale s’appuie sur SQLite et distingue trois couches :
@@ -235,7 +244,7 @@ La mémoire sert surtout à enrichir la génération, pas à polluer le choix du
 
 7. Open WebUI via Docker
 
-Le docker-compose actuel fournit aussi Open WebUI, mais cette GUI reste séparée.
+Le docker-compose actuel fournit aussi Open WebUI, mais cette GUI reste séparée et optionnelle.
 
 Important :
 
@@ -272,6 +281,13 @@ Tesseract doit être installé localement
 et soit :
 accessible dans le PATH
 soit configuré explicitement via TESSERACT_CMD
+
+Fonctionnement sans OCR :
+
+- prompts texte : OK
+- PDF texte : OK
+- `.txt`, `.md`, `.csv`, `.log`, `Dockerfile` : OK
+- image / PDF scanné : KO avec erreur explicite tant que Tesseract n’est pas installé
 
 Important :
 
@@ -434,6 +450,7 @@ Important :
 
 un simple `docker compose up -d` ne suffit pas dans ce repo, car tous les services sont placés sous profiles
 sans `--profile full` ou `--profile webui-only`, Docker peut répondre `no service selected`
+le compose surcharge aussi le healthcheck Open WebUI pour éviter le healthcheck jq embarqué dans l’image, qui peut marquer le conteneur `unhealthy` alors que l’UI répond bien
 dans ce mode, Open WebUI pointe vers l’Ollama natif
 l’orchestrateur Python n’est pas dans la boucle
 Scripts
