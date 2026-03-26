@@ -140,7 +140,6 @@ setup_python_env() {
 
     info "Création du virtualenv : ${VENV_DIR}"
     "${python_cmd}" -m venv "${VENV_DIR}"
-    APP_VENV_CREATED=true
   else
     info "Virtualenv déjà présent : ${VENV_DIR}"
   fi
@@ -154,7 +153,6 @@ setup_python_env() {
   "${VENV_PYTHON}" -m pip install --upgrade pip
   info 'Installation editable : pip install -e ".[dev]"'
   "${VENV_PYTHON}" -m pip install -e ".[dev]"
-  PYTHON_BOOTSTRAP_OK=true
   update_python_status
 }
 
@@ -174,7 +172,6 @@ launch_app() {
   fi
 
   info "Lancement FastAPI sur ${APP_URL}"
-  APP_LAUNCH_STATUS="LANCÉE"
   exec "${VENV_PYTHON}" -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
 }
 
