@@ -6,15 +6,28 @@ import os
 from pathlib import Path
 from typing import Any
 
+
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _get_int(name: str, default: int) -> int:
+    return int(os.getenv(name, str(default)))
+
+
 # URL de base Ollama — configurable via variable d'environnement
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY: bool = (
-    os.getenv("OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY", "1") != "0"
+OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY: bool = _get_bool(
+    "OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY",
+    True,
 )
 OLLAMA_GENERATE_KEEP_ALIVE: str = os.getenv("OLLAMA_GENERATE_KEEP_ALIVE", "0")
 
 # Port de l'API orchestrateur
-ORCHESTRATOR_PORT: int = int(os.getenv("ORCHESTRATOR_PORT", "8001"))
+ORCHESTRATOR_PORT: int = _get_int("ORCHESTRATOR_PORT", 8001)
 
 # Répertoires locaux de l'application
 # Par défaut, le stockage persistant est ancré à la racine du repo dans ./data
@@ -30,19 +43,26 @@ OCR_DIR: Path = APP_DATA_DIR / "ocr"
 STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 
 # Réglages mémoire / contexte
-SHORT_TERM_MESSAGE_LIMIT: int = int(os.getenv("SHORT_TERM_MESSAGE_LIMIT", "8"))
-MAX_CONTEXT_CHARS: int = int(os.getenv("MAX_CONTEXT_CHARS", "12000"))
-DOCUMENT_EXCERPT_CHARS: int = int(os.getenv("DOCUMENT_EXCERPT_CHARS", "6000"))
-ROUTING_EXCERPT_CHARS: int = int(os.getenv("ROUTING_EXCERPT_CHARS", "1200"))
+SHORT_TERM_MESSAGE_LIMIT: int = _get_int("SHORT_TERM_MESSAGE_LIMIT", 8)
+MAX_CONTEXT_CHARS: int = _get_int("MAX_CONTEXT_CHARS", 12000)
+DOCUMENT_EXCERPT_CHARS: int = _get_int("DOCUMENT_EXCERPT_CHARS", 6000)
+ROUTING_EXCERPT_CHARS: int = _get_int("ROUTING_EXCERPT_CHARS", 1200)
 
 # Réglages OCR
-OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "1") != "0"
-# 'eng' est le défaut le plus sûr côté Tesseract. Pour du français robuste,
-# configurer explicitement OCR_LANG=fra+eng et installer les packs langue.
-OCR_LANG: str = os.getenv("OCR_LANG", "eng")
-OCR_DPI: int = int(os.getenv("OCR_DPI", "200"))
-OCR_MIN_EXTRACTED_CHARS: int = int(os.getenv("OCR_MIN_EXTRACTED_CHARS", "80"))
-TESSERACT_CMD: str = os.getenv("TESSERACT_CMD", "")
+OCR_ENABLED: bool = _get_bool("OCR_ENABLED", True)
+OCR_TESSERACT_LANG: str = os.getenv("OCR_TESSERACT_LANG", os.getenv("OCR_LANG", "fra"))
+OCR_TESSERACT_FALLBACK_LANG: str = os.getenv("OCR_TESSERACT_FALLBACK_LANG", "fra+eng")
+OCR_TESSERACT_PSM: int = _get_int("OCR_TESSERACT_PSM", 6)
+OCR_TESSERACT_SPARSE_PSM: int = _get_int("OCR_TESSERACT_SPARSE_PSM", 11)
+OCR_TESSERACT_OEM: int = _get_int("OCR_TESSERACT_OEM", 3)
+OCR_ENABLE_DESKEW: bool = _get_bool("OCR_ENABLE_DESKEW", True)
+OCR_ENABLE_MULTI_PASS: bool = _get_bool("OCR_ENABLE_MULTI_PASS", True)
+OCR_MIN_TEXT_LENGTH: int = _get_int("OCR_MIN_TEXT_LENGTH", 20)
+OCR_MIN_EXTRACTED_CHARS: int = _get_int("OCR_MIN_EXTRACTED_CHARS", 80)
+OCR_DPI: int = _get_int("OCR_DPI", 200)
+OCR_DEBUG_SAVE_INTERMEDIATES: bool = _get_bool("OCR_DEBUG_SAVE_INTERMEDIATES", False)
+OCR_MIN_IMAGE_SIDE: int = _get_int("OCR_MIN_IMAGE_SIDE", 1400)
+TESSERACT_CMD: str = os.getenv("OCR_TESSERACT_CMD", os.getenv("TESSERACT_CMD", ""))
 
 # Modèle de fallback si le modèle routé n'est pas disponible
 DEFAULT_MODEL: str = "phi4-mini"

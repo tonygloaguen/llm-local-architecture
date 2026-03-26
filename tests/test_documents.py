@@ -45,6 +45,21 @@ def test_process_image_uses_ocr(tmp_path: Path, monkeypatch) -> None:
     assert result.extraction_method == "image_ocr"
 
 
+def test_process_pdf_falls_back_to_ocr_when_direct_text_is_too_short(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(documents, "ensure_storage", lambda: None)
+    monkeypatch.setattr(documents, "build_document_path", lambda filename: ("doc5", tmp_path / filename))
+    monkeypatch.setattr(documents, "build_text_artifact_path", lambda document_id: tmp_path / f"{document_id}.txt")
+    monkeypatch.setattr(documents, "_extract_pdf_text", lambda path: ("Trop court", 1))
+    monkeypatch.setattr(documents, "_render_pdf_pages", lambda path: ["page-image"])
+    monkeypatch.setattr(documents, "extract_text_from_images", lambda images: "Texte OCR retenu")
+
+    result = documents.process_document_bytes("scan.pdf", b"%PDF-1.4", "application/pdf")
+
+    assert result.ocr_used is True
+    assert result.extraction_method == "pdf_ocr"
+    assert result.text == "Texte OCR retenu"
+
+
 def test_process_text_file_without_ocr(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(documents, "ensure_storage", lambda: None)
     monkeypatch.setattr(documents, "build_document_path", lambda filename: ("doc3", tmp_path / filename))

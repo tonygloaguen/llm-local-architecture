@@ -294,7 +294,7 @@ Pour l’OCR des images et PDF scannés :
 Tesseract doit être installé localement
 et soit :
 accessible dans le PATH
-soit configuré explicitement via TESSERACT_CMD
+soit configuré explicitement via OCR_TESSERACT_CMD
 
 Fonctionnement sans OCR :
 
@@ -310,6 +310,42 @@ prompt texte seul : fonctionne
 PDF texte : fonctionne
 .txt, .md, .csv, .log, Dockerfile : fonctionnent
 image / PDF scanné : échouent avec une erreur explicite
+
+### Installation Tesseract
+
+Linux Debian/Ubuntu :
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng
+```
+
+Windows :
+
+- installer Tesseract depuis UB Mannheim ou un package interne équivalent
+- vérifier que `tesseract.exe` est dans le `PATH`
+- sinon définir `OCR_TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe`
+
+Langues :
+
+- la langue OCR par défaut du projet est `fra`
+- le fallback configurable recommandé est `fra+eng`
+- si `fra` ou `fra+eng` sont configurés sans packs installés, l’erreur retournée est explicite
+
+### Prétraitement OCR
+
+Le pipeline OCR reste entièrement local et repose sur OpenCV avant Tesseract :
+
+- conversion en niveaux de gris
+- agrandissement si l’image est trop petite
+- réduction de bruit
+- amélioration de contraste avec CLAHE
+- binarisation Otsu et adaptive selon plusieurs variantes
+- deskew simple si activé
+- bordure blanche légère
+- morphologie légère pour améliorer la lisibilité
+
+Le moteur essaie ensuite plusieurs combinaisons de preprocessing, `--psm` et langue, score les résultats et conserve l’extraction brute la plus crédible.
 Utilisation
 Interface web locale
 
@@ -408,16 +444,29 @@ MAX_CONTEXT_CHARS
 DOCUMENT_EXCERPT_CHARS
 ROUTING_EXCERPT_CHARS
 OCR_ENABLED
-OCR_LANG
 OCR_DPI
+OCR_TESSERACT_LANG
+OCR_TESSERACT_FALLBACK_LANG
+OCR_TESSERACT_PSM
+OCR_TESSERACT_SPARSE_PSM
+OCR_TESSERACT_OEM
+OCR_ENABLE_DESKEW
+OCR_ENABLE_MULTI_PASS
+OCR_MIN_TEXT_LENGTH
 OCR_MIN_EXTRACTED_CHARS
+OCR_DEBUG_SAVE_INTERMEDIATES
+OCR_TESSERACT_CMD
 TESSERACT_CMD
 
 Exemple :
 
 export OLLAMA_BASE_URL=http://localhost:11434
-export OCR_LANG=fra+eng
-export TESSERACT_CMD=/usr/bin/tesseract
+export OCR_TESSERACT_LANG=fra
+export OCR_TESSERACT_FALLBACK_LANG=fra+eng
+export OCR_TESSERACT_PSM=6
+export OCR_ENABLE_MULTI_PASS=1
+export OCR_ENABLE_DESKEW=1
+export OCR_TESSERACT_CMD=/usr/bin/tesseract
 Tests
 
 Suite validée actuellement :
@@ -425,11 +474,12 @@ Suite validée actuellement :
 routeur
 mémoire
 documents
+ocr
 web
 
 Commande :
 
-python -m pytest tests/test_router.py tests/test_memory.py tests/test_documents.py tests/test_web_app.py -v
+python -m pytest tests/test_router.py tests/test_memory.py tests/test_documents.py tests/test_ocr.py tests/test_web_app.py -v
 
 Ces tests :
 
@@ -437,6 +487,7 @@ ne nécessitent pas tous Ollama
 couvrent le cœur du routage
 couvrent la mémoire SQLite
 couvrent le pipeline documentaire
+couvrent le scoring et la stratégie OCR
 couvrent l’API web locale
 Docker
 
@@ -505,7 +556,7 @@ Pour l’OCR image / PDF scanné :
 
 Tesseract doit être installé
 soit dans le PATH
-soit configuré via TESSERACT_CMD
+soit configuré via OCR_TESSERACT_CMD
 
 Sans cela :
 
@@ -541,6 +592,13 @@ upload image scannée pour valider Tesseract
 Limites actuelles
 
 Le projet n’est pas encore une plateforme d’orchestration avancée entre plusieurs LLM.
+
+Limites OCR connues :
+
+- Tesseract reste un bon compromis offline Windows/Linux, pas une solution universelle pour tous les documents très dégradés
+- les scans flous, très compressés ou avec mise en page complexe restent difficiles
+- le scoring heuristique favorise le texte plausible, mais ne remplace pas une validation humaine sur documents critiques
+- le mode debug OCR peut générer beaucoup d’images intermédiaires dans `data/ocr/`
 
 Aujourd’hui, il s’agit d’un socle local exploitable :
 
