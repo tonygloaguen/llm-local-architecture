@@ -432,6 +432,8 @@ Ce profil est utile quand Ollama tourne déjà nativement sur la machine, par ex
 
 Important :
 
+un simple `docker compose up -d` ne suffit pas dans ce repo, car tous les services sont placés sous profiles
+sans `--profile full` ou `--profile webui-only`, Docker peut répondre `no service selected`
 dans ce mode, Open WebUI pointe vers l’Ollama natif
 l’orchestrateur Python n’est pas dans la boucle
 Scripts

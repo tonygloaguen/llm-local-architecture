@@ -53,7 +53,7 @@ cd llm-local-architecture
 7. Vérifie l'intégrité SHA-256 de chaque blob
 8. Génère le manifest courant dans `%USERPROFILE%\.llm-local\manifests\current_manifest.json`
 9. Met à jour le registre approuvé uniquement avec `-ApproveCandidates`
-8. Lance Docker Compose si Docker Desktop est installé
+10. Si Docker Desktop est installé, lance Open WebUI avec `docker compose --profile webui-only up -d`
 
 ---
 
@@ -86,6 +86,8 @@ Comportement :
 - `-AutoUpdate` et `-ForceUpdate` autorisent un pull sur un modèle déjà installé, mais ne l'approuvent jamais automatiquement.
 - Si le contenu d'un modèle approuvé change, il repasse hors `trusted` et doit être validé explicitement avec `-ApproveCandidates`.
 - `-CheckRemoteUpdates` est purement optionnel. Sans `OLLAMA_API_KEY`, le script loggue le fallback et continue en mode local.
+- Pour Open WebUI sur Windows natif, le script utilise le profil Docker Compose `webui-only`.
+- Un simple `docker compose up -d` ne suffit pas avec ce repo, car tous les services sont placés sous profiles. Sans profil explicite, Docker retourne `no service selected`.
 
 États visibles par modèle dans le manifest et le rapport final :
 
@@ -130,8 +132,17 @@ ollama run phi4-mini "Dis bonjour en une phrase"
 # API Ollama
 Invoke-RestMethod -Uri "http://localhost:11434/api/tags"
 
+# Vérifier les services Docker du profil Windows natif
+docker compose --profile webui-only config --services
+
 # Open WebUI (si Docker Desktop lancé)
 Start-Process "http://localhost:3000"
+```
+
+Commande Docker manuelle équivalente au script :
+
+```powershell
+docker compose --profile webui-only up -d
 ```
 
 ---

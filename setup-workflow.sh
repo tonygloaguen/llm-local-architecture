@@ -305,7 +305,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=no \
               ${DEPLOY_USER}@${DEPLOY_HOST} \
-              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d && docker compose ps'
+              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose --profile full pull && docker compose --profile full up -d && docker compose ps'
 
       - name: Deploy Windows WSL2
         if: github.event.inputs.target == 'windows-wsl2'
@@ -321,7 +321,7 @@ jobs:
               -p 2222 \
               -o StrictHostKeyChecking=no \
               ${DEPLOY_USER}@${DEPLOY_HOST_WIN} \
-              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose pull && docker compose up -d'
+              'cd ~/projets/llm-local-architecture && git pull origin main && docker compose --profile full pull && docker compose --profile full up -d'
 EOF
 
 info "deploy.yml créé"
@@ -401,5 +401,5 @@ echo ""
 echo "  5. Sur machine physique :"
 echo "     git clone ${REMOTE_URL}"
 echo "     bash bootstrap.sh"
-echo "     docker compose up -d"
+echo "     docker compose --profile full up -d"
 echo ""

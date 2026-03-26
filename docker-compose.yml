@@ -14,6 +14,8 @@
 #    → Sur Linux Docker Engine : extra_hosts host-gateway est requis (déjà configuré)
 #
 #  IMPORTANT
+#    Avec des services tous placés sous profiles, `docker compose up -d`
+#    seul ne sélectionne aucun service et échoue avec `no service selected`.
 #    Ce fichier ne déploie pas l'orchestrateur Python du projet.
 #    Open WebUI parle directement à Ollama dans les deux profils.
 #    Le routage automatique du projet ne s'applique donc pas à l'interface graphique actuelle.

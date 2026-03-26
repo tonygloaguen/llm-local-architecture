@@ -874,13 +874,28 @@ Step "ETAPE 8 - Docker Compose (Open WebUI)"
 if (Test-Cmd "docker") {
     Set-Location $REPO_DIR
     try {
-        & docker compose up -d
+        $dockerProfile = "webui-only"
+        Info "Profil Docker Compose selectionne : $dockerProfile"
+
+        $services = & docker compose --profile $dockerProfile config --services 2>&1
         if ($LASTEXITCODE -ne 0) {
-            throw "docker compose up a echoue"
+            throw "docker compose --profile $dockerProfile config --services a echoue : $services"
+        }
+
+        $serviceList = @($services | Where-Object { $_ -and $_.Trim() -ne "" })
+        if ($serviceList.Count -eq 0) {
+            throw "aucun service selectionne pour le profil $dockerProfile"
+        }
+
+        Info "Services Docker Compose : $($serviceList -join ', ')"
+
+        & docker compose --profile $dockerProfile up -d
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker compose --profile $dockerProfile up -d a echoue"
         }
         Info "Open WebUI accessible sur http://localhost:3000"
     } catch {
-        Warn "docker compose up echoue : $($_.Exception.Message)"
+        Warn "docker compose profil webui-only echoue : $($_.Exception.Message)"
         Warn "Verifier que Docker Desktop est lance"
     }
 } else {
