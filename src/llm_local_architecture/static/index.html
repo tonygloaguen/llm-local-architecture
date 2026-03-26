@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLM Local Architecture</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="panel">
+        <h1>Assistant local</h1>
+        <p class="subtitle">Prompt, document, OCR local et routage automatique.</p>
+        <form id="chat-form">
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" name="prompt" rows="8" placeholder="Écris ta demande ici..."></textarea>
+
+          <label for="document">Document</label>
+          <input id="document" name="document" type="file" accept=".pdf,.txt,.md,.csv,.log,.png,.jpg,.jpeg,.webp,.tif,.tiff" />
+
+          <button id="submit" type="submit">Envoyer</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Résultat</h2>
+        <div class="meta" id="meta">
+          <div><strong>Modèle :</strong> <span id="model">-</span></div>
+          <div><strong>OCR :</strong> <span id="ocr">-</span></div>
+          <div><strong>Entrée :</strong> <span id="input-type">-</span></div>
+          <div><strong>Mémoire :</strong> <span id="memory">-</span></div>
+        </div>
+        <pre id="response" class="response">Aucune réponse pour le moment.</pre>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

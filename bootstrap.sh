@@ -6,7 +6,7 @@
 # Usage : bash bootstrap.sh
 # Idempotent : ré-exécutable sans effets de bord
 # v1.2 — fix détection automatique répertoire Ollama (systemd vs user),
-#         tags corrigés granite3.3:8b et phi4-mini:3.8b
+#         tags corrigés granite3.3:8b et phi4-mini
 # =============================================================================
 set -euo pipefail
 
@@ -49,12 +49,12 @@ detect_ollama_base() {
 OLLAMA_MODELS_DIR=$(detect_ollama_base)
 
 # Batch de modèles : nom_ollama|role|repo_hf|gguf_hf_owner|gguf_hf_repo
-# v1.2 : tags corrigés granite3.3:8b et phi4-mini:3.8b
+# v1.2 : tags corrigés granite3.3:8b et phi4-mini
 MODELS=(
-  "qwen2.5-coder:7b-instruct-q4_K_M|code|Qwen/Qwen2.5-Coder-7B-Instruct|bartowski|Qwen2.5-Coder-7B-Instruct-GGUF"
+  "qwen2.5-coder:7b-instruct|code|Qwen/Qwen2.5-Coder-7B-Instruct|bartowski|Qwen2.5-Coder-7B-Instruct-GGUF"
   "granite3.3:8b|audit|ibm-granite/granite-3.3-8b-instruct|lmstudio-community|granite-3.3-8b-instruct-GGUF"
   "deepseek-r1:7b|agent|deepseek-ai/DeepSeek-R1-Distill-Qwen-7B|bartowski|DeepSeek-R1-Distill-Qwen-7B-GGUF"
-  "phi4-mini:3.8b|debug|microsoft/Phi-4-mini-instruct|bartowski|Phi-4-mini-instruct-GGUF"
+  "phi4-mini|debug|microsoft/Phi-4-mini-instruct|bartowski|Phi-4-mini-instruct-GGUF"
   "mistral:7b-instruct-v0.3-q4_K_M|redaction|mistralai/Mistral-7B-Instruct-v0.3|TheBloke|Mistral-7B-Instruct-v0.3-GGUF"
 )
 

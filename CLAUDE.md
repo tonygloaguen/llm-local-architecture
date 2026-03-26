@@ -45,8 +45,8 @@ cat ~/.llm-local/manifests/manifest.json | jq '.models[] | {name, status}'
 
 | Modèle | Rôle | VRAM |
 |--------|------|------|
-| `phi4-mini:instruct` | Router + debug (permanent en VRAM) | 2.4 Go |
-| `qwen2.5-coder:7b-instruct-q4_K_M` | Code Python/FastAPI/LangGraph | 4.1 Go |
-| `granite3.3:8b-instruct` | Audit DevSecOps / CI-CD | 4.9 Go |
+| `phi4-mini` | Router + debug (permanent en VRAM) | 2.4 Go |
+| `qwen2.5-coder:7b-instruct` | Code Python/FastAPI/LangGraph | 4.1 Go |
+| `granite3.3:8b` | Audit DevSecOps / CI-CD | 4.9 Go |
 | `deepseek-r1:7b` | Agent brain / raisonnement | 4.5 Go |
 | `mistral:7b-instruct-v0.3-q4_K_M` | Rédaction française | 4.1 Go |
