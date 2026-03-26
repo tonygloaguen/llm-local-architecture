@@ -484,7 +484,7 @@ step "ÉTAPE 2 — Installation / mise à jour contrôlée des modèles"
 MODEL_RUNTIME_JSON='[]'
 
 for model_spec in "${MODELS[@]}"; do
-  IFS='|' read -r model_full role repo_hf hf_owner hf_repo <<< "${model_spec}"
+  IFS='|' read -r model_full role repo_hf _ _ <<< "${model_spec}"
   [[ -z "${model_full}" ]] && continue
 
   info "Traitement : ${model_full}"
@@ -609,7 +609,7 @@ approved_registry=$(load_approved_registry)
 CURRENT_MODELS_JSON='[]'
 
 for model_spec in "${MODELS[@]}"; do
-  IFS='|' read -r model_full role repo_hf hf_owner hf_repo <<< "${model_spec}"
+  IFS='|' read -r model_full role repo_hf _ _ <<< "${model_spec}"
   [[ -z "${model_full}" ]] && continue
 
   runtime_json=$(echo "${MODEL_RUNTIME_JSON}" | jq -c --arg model "${model_full}" '.[] | select(.name == $model)' | head -n 1)
