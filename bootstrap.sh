@@ -59,7 +59,7 @@ MANIFEST_DIR="${LLMHOME}/manifests"
 REGISTRY_DIR="${LLMHOME}/registry"
 QUARANTINE_DIR="${LLMHOME}/quarantine"
 TRUSTED_DIR="${LLMHOME}/trusted"
-CURRENT_MANIFEST="${MANIFEST_DIR}/manifest.json"
+CURRENT_MANIFEST="${MANIFEST_DIR}/current_manifest.json"
 APPROVED_REGISTRY="${REGISTRY_DIR}/approved_models.json"
 RECHECK_SCRIPT="${LLMHOME}/recheck.sh"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -757,7 +757,7 @@ cat > "${RECHECK_SCRIPT}" <<'RECHECK_SCRIPT_EOF'
 set -euo pipefail
 
 LLMHOME="${HOME}/.llm-local"
-MANIFEST_FILE="${LLMHOME}/manifests/manifest.json"
+MANIFEST_FILE="${LLMHOME}/manifests/current_manifest.json"
 LOG_DATE=$(date +"%Y%m%d")
 LOGFILE="${LLMHOME}/logs/integrity_${LOG_DATE}.log"
 DATE_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
