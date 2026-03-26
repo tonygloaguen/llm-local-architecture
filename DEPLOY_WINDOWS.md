@@ -48,10 +48,55 @@ cd llm-local-architecture
 2. Installe Ollama si absent (téléchargement silencieux)
 3. Démarre le service Ollama
 4. Clone ou met à jour le repo
-5. Télécharge les 5 modèles via `ollama pull`
-6. Vérifie l'intégrité SHA-256 de chaque blob
-7. Génère le manifest dans `%USERPROFILE%\.llm-local\manifests\manifest.json`
+5. En mode standard, conserve les modèles déjà présents et n'installe que les modèles manquants
+6. Optionnellement, fait un `pull` contrôlé pour détecter une mise à jour via comparaison digest avant/après
+7. Vérifie l'intégrité SHA-256 de chaque blob
+8. Génère le manifest courant dans `%USERPROFILE%\.llm-local\manifests\current_manifest.json`
+9. Met à jour le registre approuvé uniquement avec `-ApproveCandidates`
 8. Lance Docker Compose si Docker Desktop est installé
+
+---
+
+## Options de mise à jour
+
+```powershell
+# Check standard : aucun pull si le modèle exact existe déjà
+.\deploy-windows.ps1
+
+# Détection fiable d'une mise à jour sans API key : pull contrôlé + comparaison digest
+.\deploy-windows.ps1 -CheckByPull
+
+# Autorise la mise à jour des modèles déjà présents
+.\deploy-windows.ps1 -AutoUpdate
+
+# Force un pull même si le modèle existe déjà
+.\deploy-windows.ps1 -ForceUpdate
+
+# Réapprouve explicitement les modèles candidate / drifted après validation humaine
+.\deploy-windows.ps1 -ApproveCandidates
+
+# Check distant optionnel si OLLAMA_API_KEY est défini
+.\deploy-windows.ps1 -CheckRemoteUpdates
+```
+
+Comportement :
+
+- Par défaut, le script ne dépend d'aucune API key et ne fait pas de pull automatique sur un modèle déjà présent.
+- `-CheckByPull` déclenche la détection fiable sans clé API en comparant le digest local avant/après `ollama pull`.
+- `-AutoUpdate` et `-ForceUpdate` autorisent un pull sur un modèle déjà installé, mais ne l'approuvent jamais automatiquement.
+- Si le contenu d'un modèle approuvé change, il repasse hors `trusted` et doit être validé explicitement avec `-ApproveCandidates`.
+- `-CheckRemoteUpdates` est purement optionnel. Sans `OLLAMA_API_KEY`, le script loggue le fallback et continue en mode local.
+
+États visibles par modèle dans le manifest et le rapport final :
+
+- `install_state` : `installed`, `already_present`, `pull_failed`
+- `trust_state` : `trusted`, `candidate`, `drifted`, `quarantine`, `missing`
+- `update_state` : `up_to_date`, `updated`, `update_unknown`
+
+Exemples :
+
+- `phi4-mini [candidate] [updated] [already_present]`
+- `granite3.3:8b [trusted] [up_to_date] [already_present]`
 
 ---
 
@@ -64,7 +109,8 @@ cd llm-local-architecture
 │       ├── manifests\   ← index des modèles
 │       └── blobs\       ← fichiers GGUF
 ├── .llm-local\
-│   ├── manifests\manifest.json   ← état d'intégrité
+│   ├── manifests\current_manifest.json   ← état courant / trust / update
+│   ├── registry\approved_models.json     ← modèles explicitement approuvés
 │   └── logs\                     ← logs de déploiement
 └── projets\
     └── llm-local-architecture\   ← repo cloné

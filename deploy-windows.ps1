@@ -5,12 +5,18 @@
 # Usage :
 #   .\deploy-windows.ps1
 #   .\deploy-windows.ps1 -ApproveCandidates
+#   .\deploy-windows.ps1 -CheckByPull
+#   .\deploy-windows.ps1 -AutoUpdate
 #   .\deploy-windows.ps1 -ForceUpdate
+#   .\deploy-windows.ps1 -CheckRemoteUpdates
 # =============================================================================
 
 param(
+    [switch]$CheckByPull,
+    [switch]$AutoUpdate,
     [switch]$ForceUpdate,
-    [switch]$ApproveCandidates
+    [switch]$ApproveCandidates,
+    [switch]$CheckRemoteUpdates
 )
 
 Set-StrictMode -Version Latest
@@ -197,6 +203,25 @@ function Get-InstalledModels {
     return $result
 }
 
+function Get-LocalModelMetadata {
+    param(
+        [string]$Model,
+        [string]$OllamaHost
+    )
+
+    try {
+        $response = Invoke-RestMethod -Uri "$OllamaHost/api/tags" -TimeoutSec 10
+        $matches = @($response.models | Where-Object { $_.name -eq $Model })
+        if ($matches.Count -gt 0) {
+            return $matches[0]
+        }
+    } catch {
+        Warn "Impossible de lire /api/tags pour $Model : $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
 function Get-ModelFingerprint {
     param(
         [string]$Model,
@@ -275,6 +300,100 @@ function Get-ModelFingerprint {
     }
 }
 
+function Get-LocalModelSnapshot {
+    param(
+        [string]$Model,
+        [string]$OllamaHost,
+        [string]$OllamaModelsDir
+    )
+
+    $metadata    = Get-LocalModelMetadata -Model $Model -OllamaHost $OllamaHost
+    $fingerprint = Get-ModelFingerprint -Model $Model -OllamaModelsDir $OllamaModelsDir
+
+    $digest = $null
+    $digestSource = "none"
+    $exists = $false
+
+    if ($metadata) {
+        $exists = $true
+        if ($metadata.PSObject.Properties.Name -contains "digest" -and $metadata.digest) {
+            $digest = $metadata.digest
+            $digestSource = "api_tags"
+        }
+    }
+
+    if (-not $digest -and $fingerprint.status -ne "missing" -and $fingerprint.manifest_sha) {
+        $digest = $fingerprint.manifest_sha
+        $digestSource = "manifest_sha"
+        $exists = $true
+    }
+
+    $modifiedAt = $null
+    $size = $null
+    $details = $null
+    if ($metadata) {
+        $modifiedAt = $metadata.modified_at
+        $size = $metadata.size
+        $details = $metadata.details
+    }
+
+    return [pscustomobject]@{
+        name          = $Model
+        exists        = $exists
+        digest        = $digest
+        digest_source = $digestSource
+        modified_at   = $modifiedAt
+        size          = $size
+        details       = $details
+        fingerprint   = $fingerprint
+    }
+}
+
+function Get-RemoteModelDigest {
+    param([string]$Model)
+
+    if (-not $CheckRemoteUpdates) {
+        return [pscustomobject]@{
+            status = "skipped"
+            digest = $null
+            note   = "option disabled"
+        }
+    }
+
+    if (-not $env:OLLAMA_API_KEY) {
+        return [pscustomobject]@{
+            status = "skipped"
+            digest = $null
+            note   = "OLLAMA_API_KEY absent"
+        }
+    }
+
+    try {
+        $headers = @{ Authorization = "Bearer $($env:OLLAMA_API_KEY)" }
+        $response = Invoke-RestMethod -Uri "https://ollama.com/api/tags" -Headers $headers -TimeoutSec 15
+        $matches = @($response.models | Where-Object { $_.name -eq $Model })
+        if ($matches.Count -gt 0 -and $matches[0].digest) {
+            return [pscustomobject]@{
+                status = "ok"
+                digest = $matches[0].digest
+                note   = $null
+            }
+        }
+
+        return [pscustomobject]@{
+            status = "failed"
+            digest = $null
+            note   = "remote digest introuvable"
+        }
+    } catch {
+        return [pscustomobject]@{
+            status = "failed"
+            digest = $null
+            note   = $_.Exception.Message
+        }
+    }
+}
+
 function Compare-ModelWithApproved {
     param(
         [object]$CurrentFingerprint,
@@ -317,7 +436,7 @@ function Approve-CandidateModels {
     )
 
     foreach ($model in $CurrentManifest.models) {
-        if ($model.status -in @("candidate", "trusted")) {
+        if ($model.status -in @("candidate", "trusted", "drifted")) {
             $existing = Get-ApprovedModelEntry -Registry $Registry -ModelName $model.name
 
             if ($existing) {
@@ -363,8 +482,11 @@ Ensure-Directory -Path $TRUSTED_DIR
 Step "ETAPE 0 - Initialisation"
 Info "Log : $LOGFILE"
 Info "Repo cible : $REPO_DIR"
+Info "CheckByPull : $CheckByPull"
+Info "AutoUpdate : $AutoUpdate"
 Info "ForceUpdate : $ForceUpdate"
 Info "ApproveCandidates : $ApproveCandidates"
+Info "CheckRemoteUpdates : $CheckRemoteUpdates"
 
 # ---------------------------------------------------------------------------
 # ETAPE 1 - VERIFICATION GPU NVIDIA
@@ -495,28 +617,87 @@ Info "Repo a jour : $REPO_DIR"
 Step "ETAPE 5 - Telechargement des modeles"
 
 $installedModels = Get-InstalledModels
+$ollamaModelsDirForPull = Get-OllamaModelsDir
+$modelOperations = @{}
 $countOK   = 0
 $countFail = 0
 
 foreach ($model in $MODELS) {
-    Info "Pull : $model"
+    Info "Traitement : $model"
+
+    $beforeSnapshot = $null
+    $remoteCheck = [pscustomobject]@{
+        status = "skipped"
+        digest = $null
+        note   = "not available"
+    }
 
     try {
-        $isInstalled = $false
-        if ($installedModels) {
-            $isInstalled = [bool](@($installedModels | Where-Object { $_ -eq $model }).Count)
+        $beforeSnapshot = Get-LocalModelSnapshot -Model $model -OllamaHost $env:OLLAMA_HOST -OllamaModelsDir $ollamaModelsDirForPull
+        $remoteCheck = Get-RemoteModelDigest -Model $model
+
+        $isInstalled = $beforeSnapshot.exists
+        $shouldPull = (-not $isInstalled) -or $ForceUpdate -or $AutoUpdate -or $CheckByPull
+        $installState = if ($isInstalled) { "already_present" } else { "installed" }
+        $updateState = "up_to_date"
+        $pullPerformed = $false
+        $pullNote = $null
+        $pullReason = "standard_check"
+        $afterSnapshot = $beforeSnapshot
+
+        if (-not $isInstalled) {
+            $pullReason = "install_missing"
+        } elseif ($ForceUpdate) {
+            $pullReason = "force_update"
+        } elseif ($AutoUpdate) {
+            $pullReason = "auto_update"
+        } elseif ($CheckByPull) {
+            $pullReason = "check_by_pull"
         }
 
-        if ($isInstalled -and -not $ForceUpdate) {
-            Info "  -> Deja present localement : $model"
+        if ($CheckRemoteUpdates) {
+            if ($remoteCheck.status -eq "ok" -and $beforeSnapshot.digest) {
+                if ($remoteCheck.digest -ne $beforeSnapshot.digest) {
+                    Warn "  -> Digest distant different detecte pour $model"
+                    if (-not $shouldPull) {
+                        $updateState = "update_unknown"
+                    }
+                } else {
+                    Info "  -> Check distant OK : pas de difference detectee"
+                }
+            } else {
+                Warn "  -> Check distant ignore : $($remoteCheck.note)"
+            }
+        }
+
+        if (-not $shouldPull) {
+            Info "  -> Check standard : deja present localement, aucun pull"
+            $modelOperations[$model] = [pscustomobject]@{
+                install_state      = $installState
+                update_state       = $updateState
+                pull_performed     = $pullPerformed
+                pull_reason        = $pullReason
+                pull_note          = $pullNote
+                before_digest      = $beforeSnapshot.digest
+                after_digest       = $afterSnapshot.digest
+                local_digest_source= $afterSnapshot.digest_source
+                remote_check       = $remoteCheck
+            }
             $countOK++
             continue
         }
 
         if ($ForceUpdate -and $isInstalled) {
             Warn "  -> ForceUpdate actif : repull de $model"
+        } elseif ($AutoUpdate -and $isInstalled) {
+            Warn "  -> AutoUpdate actif : pull controle de $model"
+        } elseif ($CheckByPull -and $isInstalled) {
+            Info "  -> CheckByPull actif : verification via pull controle de $model"
+        } elseif (-not $isInstalled) {
+            Info "  -> Installation du modele manquant : $model"
         }
 
+        $pullPerformed = $true
         Invoke-Retry {
             & ollama pull $model
             $exitCode = $LASTEXITCODE
@@ -525,11 +706,56 @@ foreach ($model in $MODELS) {
             }
         }
 
-        Info "  -> Pull reussi : $model"
+        $afterSnapshot = Get-LocalModelSnapshot -Model $model -OllamaHost $env:OLLAMA_HOST -OllamaModelsDir $ollamaModelsDirForPull
+
+        if (-not $afterSnapshot.exists -or -not $afterSnapshot.digest) {
+            $updateState = "update_unknown"
+            $pullNote = "pull reussi mais digest courant introuvable"
+            Warn "  -> Pull reussi mais digest courant introuvable : $model"
+        } elseif (-not $isInstalled) {
+            $installState = "installed"
+            $updateState = "up_to_date"
+            Info "  -> Installation reussie : $model"
+        } elseif ($beforeSnapshot.digest -eq $afterSnapshot.digest) {
+            $updateState = "up_to_date"
+            Info "  -> Pull reussi sans changement de digest : $model"
+        } else {
+            $updateState = "updated"
+            Warn "  -> Mise a jour detectee apres pull : $model"
+        }
+
+        $modelOperations[$model] = [pscustomobject]@{
+            install_state       = $installState
+            update_state        = $updateState
+            pull_performed      = $pullPerformed
+            pull_reason         = $pullReason
+            pull_note           = $pullNote
+            before_digest       = $beforeSnapshot.digest
+            after_digest        = $afterSnapshot.digest
+            local_digest_source = $afterSnapshot.digest_source
+            remote_check        = $remoteCheck
+        }
+
         $countOK++
     } catch {
         Err "  -> Echec pull : $model"
         Err "     Detail : $($_.Exception.Message)"
+        $afterSnapshot = Get-LocalModelSnapshot -Model $model -OllamaHost $env:OLLAMA_HOST -OllamaModelsDir $ollamaModelsDirForPull
+        $beforeDigest = $null
+        if ($beforeSnapshot) {
+            $beforeDigest = $beforeSnapshot.digest
+        }
+        $modelOperations[$model] = [pscustomobject]@{
+            install_state       = "pull_failed"
+            update_state        = "update_unknown"
+            pull_performed      = $true
+            pull_reason         = "pull_failed"
+            pull_note           = $_.Exception.Message
+            before_digest       = $beforeDigest
+            after_digest        = $afterSnapshot.digest
+            local_digest_source = $afterSnapshot.digest_source
+            remote_check        = $remoteCheck
+        }
         $countFail++
     }
 }
@@ -564,11 +790,45 @@ foreach ($model in $MODELS) {
     $fingerprint = Get-ModelFingerprint -Model $model -OllamaModelsDir $ollamaModelsDir
     $approved    = Get-ApprovedModelEntry -Registry $approvedRegistry -ModelName $model
     $trustState  = Compare-ModelWithApproved -CurrentFingerprint $fingerprint -ApprovedEntry $approved
+    if ($modelOperations.ContainsKey($model)) {
+        $operation = $modelOperations[$model]
+    } else {
+        $defaultInstallState = "already_present"
+        $defaultUpdateState = "up_to_date"
+        if ($fingerprint.status -eq "missing") {
+            $defaultInstallState = "pull_failed"
+            $defaultUpdateState = "update_unknown"
+        }
+
+        $operation = [pscustomobject]@{
+            install_state       = $defaultInstallState
+            update_state        = $defaultUpdateState
+            pull_performed      = $false
+            pull_reason         = "standard_check"
+            pull_note           = $null
+            before_digest       = $null
+            after_digest        = $null
+            local_digest_source = "unknown"
+            remote_check        = [pscustomobject]@{ status = "skipped"; digest = $null; note = "not available" }
+        }
+    }
 
     $entry = [pscustomobject]@{
         name          = $fingerprint.name
+        install_state = $operation.install_state
+        trust_state   = $trustState
+        update_state  = $operation.update_state
         manifest_path = $fingerprint.manifest_path
         manifest_sha  = $fingerprint.manifest_sha
+        local_digest  = $operation.after_digest
+        previous_digest = $operation.before_digest
+        local_digest_source = $operation.local_digest_source
+        remote_digest = $operation.remote_check.digest
+        remote_check_status = $operation.remote_check.status
+        remote_check_note = $operation.remote_check.note
+        pull_performed = $operation.pull_performed
+        pull_reason    = $operation.pull_reason
+        pull_note      = $operation.pull_note
         local_status  = $fingerprint.status
         status        = $trustState
         note          = $fingerprint.note
@@ -652,7 +912,7 @@ foreach ($model in $MODELS) {
 Write-Host ""
 Write-Host "  ETAT ACTUEL :"
 foreach ($model in $currentManifest.models) {
-    Write-Host ("    -> {0} [{1}]" -f $model.name, $model.status)
+    Write-Host ("    -> {0} [{1}] [{2}] [{3}]" -f $model.name, $model.trust_state, $model.update_state, $model.install_state)
 }
 Write-Host ""
 Write-Host "  ACCES :"
@@ -666,4 +926,3 @@ Write-Host '    ollama run phi4-mini "Dis bonjour en une phrase"'
 Write-Host ""
 
 Info "Deploiement Windows termine"
-

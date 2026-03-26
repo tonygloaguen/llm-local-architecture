@@ -40,6 +40,21 @@ Ces scripts servent à préparer la couche runtime locale des modèles :
 - vérifications associées
 - préparation de l’environnement local nécessaire
 
+Modes de contrôle disponibles pour les scripts de déploiement :
+
+- Check standard : ne fait pas de `pull` si le modèle exact est déjà présent localement.
+- Check by pull : fait un `pull` contrôlé et compare le digest avant/après pour détecter une mise à jour sans dépendre d’une API key.
+- Auto update : autorise la mise à jour des modèles déjà présents via `pull`, sans approbation automatique.
+- Force update : force un `pull` même si le modèle est déjà présent.
+- Approve candidates : écrit explicitement dans le registre approuvé après validation humaine.
+- Remote check : optionnel, nécessite `OLLAMA_API_KEY` pour comparer le digest local au digest distant via `https://ollama.com/api`.
+
+États exposés par modèle :
+
+- `install_state` : `installed`, `already_present`, `pull_failed`
+- `trust_state` : `trusted`, `candidate`, `drifted`, `quarantine`, `missing`
+- `update_state` : `up_to_date`, `updated`, `update_unknown`
+
 Ensuite seulement tu prépares l’environnement Python du projet.
 
 ### 2. Routine normale ensuite
