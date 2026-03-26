@@ -187,7 +187,9 @@ async def chat(
         effective_prompt,
         processed_document,
         memory,
+        input_type=input_type,
     )
+    logger.debug("Chat final_prompt=%r", generation_prompt)
 
     response_text, actual_model, fallback_used = await _generate_with_fallback(
         generation_prompt,

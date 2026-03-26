@@ -18,7 +18,7 @@ def test_chat_text_only(monkeypatch) -> None:
     monkeypatch.setattr(
         orchestrator,
         "build_generation_prompt",
-        lambda prompt, document, memory: (prompt, []),
+        lambda prompt, document, memory, input_type="text": (prompt, []),
     )
 
     async def fake_generate(prompt: str, selected_model: str):

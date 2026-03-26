@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import logging
 from pathlib import Path
 
 from PIL import Image
@@ -17,6 +18,8 @@ from .storage import build_document_path, build_text_artifact_path, ensure_stora
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
 TEXT_SUFFIXES = {".txt", ".md", ".csv", ".log"}
 TEXT_FILENAMES = {"dockerfile"}
+
+logger = logging.getLogger(__name__)
 
 
 def determine_input_type(prompt: str, has_document: bool) -> str:
@@ -98,6 +101,16 @@ def process_document_bytes(
         ocr_used = True
     else:
         raise ValueError(f"Type de document non supporté: {suffix or filename}")
+
+    logger.debug(
+        "Document processed filename=%s source_type=%s extraction_method=%s ocr_used=%s extracted_chars=%s extracted_text=%r",
+        filename,
+        source_type,
+        extraction_method,
+        ocr_used,
+        len(extracted_text),
+        extracted_text,
+    )
 
     extracted_path = build_text_artifact_path(document_id)
     extracted_path.write_text(extracted_text, encoding="utf-8")

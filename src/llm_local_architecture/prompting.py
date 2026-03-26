@@ -42,29 +42,36 @@ def build_generation_prompt(
     prompt: str,
     document: ProcessedDocument | None,
     memory: MemoryBundle,
+    input_type: str = "text",
 ) -> tuple[str, list[str]]:
     """Construit le prompt final envoyé à Ollama."""
     sources = list(memory.sources)
     user_prompt = prompt.strip() or "Résume le document fourni, identifie son type, puis réponds de manière structurée."
-
-    sections = [
-        "Tu es un assistant local exécuté hors ligne.",
-        f"Demande utilisateur:\n{user_prompt}",
-    ]
+    sections = ["Tu es un assistant local exécuté hors ligne."]
 
     if memory.short_term_text:
         sections.append(f"Historique de session récent:\n{_clip(memory.short_term_text, 2000)}")
 
     if document is not None:
+        document_heading = "Texte OCR prioritaire" if input_type in {"document", "text+document"} else "Document courant"
         sections.append(
-            "Document courant:\n"
+            f"{document_heading}:\n"
             f"nom={document.filename}\n"
             f"type={document.source_type}\n"
             f"ocr_used={document.ocr_used}\n"
+            f"extraction={document.extraction_method}\n"
             f"contenu=\n{_clip(document.text, DOCUMENT_EXCERPT_CHARS)}"
+        )
+        sections.append(
+            "Règles de réponse documentaires:\n"
+            "Réponds uniquement à partir du texte OCR/extrait ci-dessus.\n"
+            "N'invente rien et n'utilise aucune connaissance externe.\n"
+            "Si l'information demandée n'est pas présente dans ce texte, réponds qu'elle est absente du document."
         )
         if "documentary" not in sources:
             sources.append("documentary")
+
+    sections.append(f"Demande utilisateur:\n{user_prompt}")
 
     if memory.preferences_text:
         sections.append(f"Préférences utilisateur:\n{memory.preferences_text}")
