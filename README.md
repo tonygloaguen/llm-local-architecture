@@ -47,7 +47,7 @@ Ils gèrent :
 - l’installation ou la vérification d’Ollama selon la plateforme
 - le téléchargement contrôlé des modèles
 - les vérifications d’intégrité et d’approbation
-- la vérification OCR Tesseract
+- la validation OCR locale réelle : binaire Tesseract, langue `fra`, imports Python OCR (`cv2`, `numpy`, `pytesseract`) et test runtime minimal
 - Open WebUI via Docker en option
 
 États exposés par modèle :
@@ -331,6 +331,8 @@ Langues :
 - la langue OCR par défaut du projet est `fra`
 - le fallback configurable recommandé est `fra+eng`
 - si `fra` ou `fra+eng` sont configurés sans packs installés, l’erreur retournée est explicite
+- les scripts `bootstrap.sh` et `deploy-windows.ps1` considèrent `fra` comme indispensable pour un environnement OCR nominal
+- `eng` reste recommandé pour le fallback, mais son absence ne bloque pas l’usage français principal
 
 ### Prétraitement OCR
 
@@ -346,6 +348,17 @@ Le pipeline OCR reste entièrement local et repose sur OpenCV avant Tesseract :
 - morphologie légère pour améliorer la lisibilité
 
 Le moteur essaie ensuite plusieurs combinaisons de preprocessing, `--psm` et langue, score les résultats et conserve l’extraction brute la plus crédible.
+
+### Diagnostic de base
+
+Les scripts de préparation valident maintenant l’OCR de manière opérationnelle :
+
+- détection explicite du binaire Tesseract
+- vérification des langues installées
+- vérification des imports Python OCR dans le virtualenv
+- test OCR fonctionnel minimal sur une image synthétique
+
+Si cette validation échoue, le script sort en erreur non nulle au lieu de considérer l’environnement comme prêt.
 Utilisation
 Interface web locale
 

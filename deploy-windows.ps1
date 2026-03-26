@@ -62,11 +62,16 @@ $MODELS = @(
 $script:TesseractStatus = "ABSENT"
 $script:TesseractPath = $null
 $script:TesseractLanguages = @()
-$script:TesseractImpact = "OCR image / PDF scanne indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
+$script:TesseractImpact = "OCR image / PDF scanne indisponible ; installer Tesseract, la langue fra et les dependances Python OCR."
 $script:PythonVenvDir = $null
 $script:PythonVenvPython = $null
 $script:PythonVenvStatus = "ABSENT"
 $script:PythonDepsStatus = "A installer"
+$script:OcrPythonModulesStatus = "NON VALIDE"
+$script:OcrRuntimeStatus = "NON VALIDE"
+$script:OcrFunctionalTestStatus = "NON VALIDE"
+$script:OcrOverallStatus = "NON VALIDE"
+$script:OcrFailureReason = $null
 $script:FastApiUrl = "http://127.0.0.1:8001"
 
 # ---------------------------------------------------------------------------
@@ -312,12 +317,17 @@ function Initialize-TesseractStatus {
         $script:TesseractLanguages = @(Get-TesseractLanguages -TesseractCmd $script:TesseractPath)
         $env:TESSERACT_CMD = $script:TesseractPath
 
-        if ($script:TesseractLanguages -contains "eng" -and $script:TesseractLanguages -contains "fra") {
-            $script:TesseractImpact = "OCR pret pour eng et fra ; image / PDF scanne utilisables."
+        if ($script:TesseractLanguages -contains "fra" -and $script:TesseractLanguages -contains "eng") {
+            $script:TesseractImpact = "Binaire Tesseract pret avec fra et eng."
+        } elseif ($script:TesseractLanguages -contains "fra") {
+            $script:TesseractStatus = "WARNING"
+            $script:TesseractImpact = "Binaire Tesseract pret avec fra ; fallback eng absent."
         } elseif ($script:TesseractLanguages -contains "eng") {
-            $script:TesseractImpact = "OCR disponible avec eng ; installez fra pour un OCR francais plus fiable."
+            $script:TesseractStatus = "ERROR"
+            $script:TesseractImpact = "Tesseract detecte mais fra manque ; OCR francais nominal indisponible."
         } else {
-            $script:TesseractImpact = "Tesseract detecte, mais le pack eng manque ; OCR a completer avant usage normal."
+            $script:TesseractStatus = "ERROR"
+            $script:TesseractImpact = "Tesseract detecte sans fra ; OCR francais indisponible."
         }
 
         Info "Tesseract detecte : $script:TesseractPath"
@@ -331,9 +341,159 @@ function Initialize-TesseractStatus {
     }
 
     Warn "Tesseract absent sur cette machine Windows"
-    Warn "OCR image / PDF scanne indisponible tant que Tesseract n'est pas installe"
+    Warn "OCR image / PDF scanne indisponible tant que Tesseract et la langue fra ne sont pas installes"
     Warn "Installation recommandee : winget install --id UB-Mannheim.TesseractOCR -e"
     Warn "Chemin attendu ensuite : C:\Program Files\Tesseract-OCR\tesseract.exe"
+}
+
+function Test-OcrPythonRuntime {
+    if (-not (Test-Path $script:PythonVenvPython)) {
+        $script:OcrPythonModulesStatus = "ERROR"
+        $script:OcrRuntimeStatus = "ERROR"
+        $script:OcrFunctionalTestStatus = "ERROR"
+        $script:OcrOverallStatus = "ERROR"
+        $script:OcrFailureReason = "Virtualenv absent. Relancer avec -SetupPythonEnv pour installer les dependances OCR."
+        return $false
+    }
+
+    $pythonSnippet = @'
+import os
+import re
+import sys
+
+from PIL import Image
+
+details = {}
+
+try:
+    import cv2
+    details["cv2"] = cv2.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:cv2:{exc}")
+    sys.exit(2)
+
+try:
+    import numpy
+    details["numpy"] = numpy.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:numpy:{exc}")
+    sys.exit(2)
+
+try:
+    import pytesseract
+    details["pytesseract"] = pytesseract.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:pytesseract:{exc}")
+    sys.exit(2)
+
+tesseract_cmd = os.environ.get("OCR_TESSERACT_CMD", "").strip()
+if tesseract_cmd:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+available = set(pytesseract.get_languages(config=""))
+ordered_langs = ",".join(sorted(available))
+print(f"DETAIL:IMPORTS:cv2={details['cv2']};numpy={details['numpy']};pytesseract={details['pytesseract']}")
+print(f"DETAIL:LANGS:{ordered_langs}")
+
+if "fra" not in available:
+    print("ERROR:LANG:fra_missing")
+    sys.exit(3)
+
+image = numpy.full((220, 900, 3), 255, dtype=numpy.uint8)
+cv2.putText(
+    image,
+    "BONJOUR 2026",
+    (30, 140),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    3.0,
+    (0, 0, 0),
+    5,
+    cv2.LINE_AA,
+)
+
+pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+text = pytesseract.image_to_string(pil_image, lang="fra", config="--oem 3 --psm 7").strip()
+normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+print(f"DETAIL:OCR_TEXT:{text}")
+
+if "bonjour" not in normalized:
+    print(f"ERROR:FUNCTIONAL:{text}")
+    sys.exit(4)
+
+print("OK:OCR_RUNTIME")
+'@
+
+    $env:OCR_TESSERACT_CMD = $script:TesseractPath
+    $output = @(& $script:PythonVenvPython -c $pythonSnippet 2>&1)
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        $script:OcrPythonModulesStatus = "ERROR"
+        $script:OcrRuntimeStatus = "ERROR"
+        $script:OcrFunctionalTestStatus = "ERROR"
+        $script:OcrOverallStatus = "ERROR"
+        $script:OcrFailureReason = ($output | Select-Object -Last 1)
+        return $false
+    }
+
+    foreach ($line in $output) {
+        if (-not $line) { continue }
+        if ($line -like "DETAIL:IMPORTS:*") {
+            Info ("OCR Python imports : {0}" -f $line.Substring("DETAIL:IMPORTS:".Length))
+        } elseif ($line -like "DETAIL:LANGS:*") {
+            Info ("OCR langues vues depuis pytesseract : {0}" -f $line.Substring("DETAIL:LANGS:".Length))
+        } elseif ($line -like "DETAIL:OCR_TEXT:*") {
+            Info ("OCR test fonctionnel : {0}" -f $line.Substring("DETAIL:OCR_TEXT:".Length))
+        } elseif ($line -eq "OK:OCR_RUNTIME") {
+            Info "OCR runtime Python valide"
+        }
+    }
+
+    $script:OcrPythonModulesStatus = "OK"
+    $script:OcrRuntimeStatus = "OK"
+    $script:OcrFunctionalTestStatus = "OK"
+    $script:OcrOverallStatus = "OK"
+    $script:OcrFailureReason = $null
+    return $true
+}
+
+function Validate-OcrEnvironment {
+    $script:OcrPythonModulesStatus = "NON VALIDE"
+    $script:OcrRuntimeStatus = "NON VALIDE"
+    $script:OcrFunctionalTestStatus = "NON VALIDE"
+    $script:OcrOverallStatus = "NON VALIDE"
+    $script:OcrFailureReason = $null
+
+    if ($script:TesseractStatus -eq "ABSENT") {
+        $script:OcrOverallStatus = "ERROR"
+        $script:OcrFailureReason = "Tesseract introuvable."
+        return $false
+    }
+
+    if (-not ($script:TesseractLanguages -contains "fra")) {
+        $script:TesseractStatus = "ERROR"
+        $script:TesseractImpact = "Le pack langue fra manque ; l'usage OCR francais nominal est indisponible."
+        $script:OcrOverallStatus = "ERROR"
+        $script:OcrFailureReason = "Langue fra absente dans Tesseract."
+        return $false
+    }
+
+    if ($script:TesseractLanguages -contains "eng") {
+        $script:TesseractImpact = "OCR pret pour fra avec fallback eng ; image / PDF scanne exploitables."
+    } else {
+        $script:TesseractImpact = "OCR pret pour fra ; fallback eng absent mais usage francais nominal disponible."
+    }
+
+    if (-not (Test-OcrPythonRuntime)) {
+        $script:TesseractImpact = "Chaine OCR incomplete ; corriger le runtime Python avant usage image / PDF scanne."
+        return $false
+    }
+
+    if (-not ($script:TesseractLanguages -contains "eng")) {
+        $script:OcrOverallStatus = "WARNING"
+    }
+
+    return $true
 }
 
 # ---------------------------------------------------------------------------
@@ -794,6 +954,12 @@ if (Test-Cmd "docker") {
 # ---------------------------------------------------------------------------
 Step "ETAPE 3B - Verification OCR Tesseract"
 Initialize-TesseractStatus
+if ($script:TesseractStatus -in @("OK", "WARNING")) {
+    Info "Tesseract detecte : $script:TesseractPath"
+    Info "Langues Tesseract : $(if ($script:TesseractLanguages.Count -gt 0) { $script:TesseractLanguages -join ', ' } else { 'aucune' })"
+} else {
+    Warn "Les documents image / PDF scanne resteront indisponibles tant que Tesseract et fra ne sont pas installes"
+}
 
 # ---------------------------------------------------------------------------
 # ETAPE 4 - REPO
@@ -1137,6 +1303,20 @@ if ($SetupPythonEnv) {
 }
 
 # ---------------------------------------------------------------------------
+# ETAPE 9 - VALIDATION OCR RUNTIME
+# ---------------------------------------------------------------------------
+Step "ETAPE 9 - Validation OCR runtime"
+if (Validate-OcrEnvironment) {
+    if ($script:OcrOverallStatus -eq "WARNING") {
+        Warn "OCR exploitable avec limitation : $script:TesseractImpact"
+    } else {
+        Info "OCR exploitable : chaine locale validee"
+    }
+} else {
+    Err "OCR non exploitable : $script:OcrFailureReason"
+}
+
+# ---------------------------------------------------------------------------
 # RAPPORT FINAL
 # ---------------------------------------------------------------------------
 Step "RAPPORT FINAL"
@@ -1157,7 +1337,14 @@ Write-Host "  OCR :"
 Write-Host "    Tesseract : $script:TesseractStatus"
 Write-Host "    Chemin    : $(if ($script:TesseractPath) { $script:TesseractPath } else { 'non detecte' })"
 Write-Host "    Langues   : $(if ($script:TesseractLanguages.Count -gt 0) { $script:TesseractLanguages -join ', ' } else { 'aucune' })"
+Write-Host "    Imports   : $script:OcrPythonModulesStatus"
+Write-Host "    Runtime   : $script:OcrRuntimeStatus"
+Write-Host "    Test OCR  : $script:OcrFunctionalTestStatus"
+Write-Host "    Statut    : $script:OcrOverallStatus"
 Write-Host "    Impact    : $script:TesseractImpact"
+if ($script:OcrFailureReason) {
+    Write-Host "    Diagnostic: $script:OcrFailureReason"
+}
 Write-Host ""
 Write-Host "  PYTHON :"
 Write-Host "    Virtualenv       : $script:PythonVenvStatus"
@@ -1195,7 +1382,12 @@ Write-Host "  TEST RAPIDE :"
 Write-Host '    ollama run phi4-mini "Dis bonjour en une phrase"'
 Write-Host ""
 
-Info "Deploiement Windows termine"
+if ($script:OcrOverallStatus -eq "ERROR") {
+    Err "Deploiement Windows termine avec echec OCR"
+    exit 1
+}
+
+Info "Deploiement Windows termine (ocr=$($script:OcrOverallStatus))"
 
 if ($LaunchApp) {
     Set-Location $REPO_DIR

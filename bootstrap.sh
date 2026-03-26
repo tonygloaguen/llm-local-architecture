@@ -20,6 +20,10 @@ SETUP_PYTHON_ENV=false
 LAUNCH_APP=false
 PYTHON_VENV_STATUS="ABSENT"
 PYTHON_DEPS_STATUS="À installer"
+OCR_PYTHON_MODULES_STATUS="NON VALIDÉ"
+OCR_RUNTIME_STATUS="NON VALIDÉ"
+OCR_FUNCTIONAL_TEST_STATUS="NON VALIDÉ"
+OCR_OVERALL_STATUS="NON VALIDÉ"
 APP_URL="http://127.0.0.1:8001"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${REPO_DIR}/.venv"
@@ -105,7 +109,8 @@ COUNT_INSTALLED=0
 TESSERACT_STATUS="ABSENT"
 TESSERACT_PATH_DISPLAY="non détecté"
 TESSERACT_LANGS_DISPLAY="aucune"
-TESSERACT_IMPACT="OCR image / PDF scanné indisponible ; texte, PDF texte et fichiers texte simples restent utilisables."
+TESSERACT_IMPACT="OCR image / PDF scanné indisponible ; installez Tesseract, la langue fra et les dépendances Python OCR."
+OCR_FAILURE_REASON=""
 
 update_python_status() {
   if [[ -x "${VENV_PYTHON}" ]]; then
@@ -119,6 +124,167 @@ update_python_status() {
     PYTHON_VENV_STATUS="ABSENT"
     PYTHON_DEPS_STATUS="À installer"
   fi
+}
+
+validate_ocr_python_runtime_linux() {
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    OCR_PYTHON_MODULES_STATUS="ERROR"
+    OCR_RUNTIME_STATUS="ERROR"
+    OCR_FUNCTIONAL_TEST_STATUS="ERROR"
+    OCR_OVERALL_STATUS="ERROR"
+    OCR_FAILURE_REASON="Virtualenv absent. Relancez avec --setup-python-env pour installer les dépendances OCR."
+    return 1
+  fi
+
+  local python_output
+  if ! python_output=$(
+    OCR_TESSERACT_CMD="${TESSERACT_PATH_DISPLAY}" \
+    "${VENV_PYTHON}" - <<'PY'
+import os
+import re
+import sys
+
+from PIL import Image
+
+details = {}
+
+try:
+    import cv2
+    details["cv2"] = cv2.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:cv2:{exc}")
+    sys.exit(2)
+
+try:
+    import numpy
+    details["numpy"] = numpy.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:numpy:{exc}")
+    sys.exit(2)
+
+try:
+    import pytesseract
+    details["pytesseract"] = pytesseract.__version__
+except Exception as exc:
+    print(f"ERROR:IMPORT:pytesseract:{exc}")
+    sys.exit(2)
+
+tesseract_cmd = os.environ.get("OCR_TESSERACT_CMD", "").strip()
+if tesseract_cmd:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+available = set(pytesseract.get_languages(config=""))
+ordered_langs = ",".join(sorted(available))
+print(f"DETAIL:IMPORTS:cv2={details['cv2']};numpy={details['numpy']};pytesseract={details['pytesseract']}")
+print(f"DETAIL:LANGS:{ordered_langs}")
+
+if "fra" not in available:
+    print("ERROR:LANG:fra_missing")
+    sys.exit(3)
+
+image = numpy.full((220, 900, 3), 255, dtype=numpy.uint8)
+cv2.putText(
+    image,
+    "BONJOUR 2026",
+    (30, 140),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    3.0,
+    (0, 0, 0),
+    5,
+    cv2.LINE_AA,
+)
+
+pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+text = pytesseract.image_to_string(pil_image, lang="fra", config="--oem 3 --psm 7").strip()
+normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+print(f"DETAIL:OCR_TEXT:{text}")
+
+if "bonjour" not in normalized:
+    print(f"ERROR:FUNCTIONAL:{text}")
+    sys.exit(4)
+
+print("OK:OCR_RUNTIME")
+PY
+  ); then
+    OCR_PYTHON_MODULES_STATUS="ERROR"
+    OCR_RUNTIME_STATUS="ERROR"
+    OCR_FUNCTIONAL_TEST_STATUS="ERROR"
+    OCR_OVERALL_STATUS="ERROR"
+    OCR_FAILURE_REASON="$(printf '%s' "${python_output}" | tail -n 1)"
+    return 1
+  fi
+
+  OCR_PYTHON_MODULES_STATUS="OK"
+  OCR_RUNTIME_STATUS="OK"
+  OCR_FUNCTIONAL_TEST_STATUS="OK"
+  OCR_OVERALL_STATUS="OK"
+  OCR_FAILURE_REASON=""
+
+  while IFS= read -r line; do
+    [[ -z "${line}" ]] && continue
+    case "${line}" in
+      DETAIL:IMPORTS:*)
+        info "OCR Python imports : ${line#DETAIL:IMPORTS:}"
+        ;;
+      DETAIL:LANGS:*)
+        info "OCR langues vues depuis pytesseract : ${line#DETAIL:LANGS:}"
+        ;;
+      DETAIL:OCR_TEXT:*)
+        info "OCR test fonctionnel : ${line#DETAIL:OCR_TEXT:}"
+        ;;
+      OK:OCR_RUNTIME)
+        info "OCR runtime Python validé"
+        ;;
+    esac
+  done <<< "${python_output}"
+}
+
+validate_ocr_linux() {
+  OCR_PYTHON_MODULES_STATUS="NON VALIDÉ"
+  OCR_RUNTIME_STATUS="NON VALIDÉ"
+  OCR_FUNCTIONAL_TEST_STATUS="NON VALIDÉ"
+  OCR_OVERALL_STATUS="NON VALIDÉ"
+  OCR_FAILURE_REASON=""
+
+  if [[ "${TESSERACT_STATUS}" != "OK" && "${TESSERACT_STATUS}" != "WARNING" ]]; then
+    OCR_OVERALL_STATUS="ERROR"
+    OCR_FAILURE_REASON="Tesseract introuvable."
+    return 1
+  fi
+
+  local has_fra=false
+  local has_eng=false
+  local lang
+  IFS=',' read -ra _langs <<< "${TESSERACT_LANGS_DISPLAY}"
+  for lang in "${_langs[@]}"; do
+    lang="$(echo "${lang}" | xargs)"
+    [[ "${lang}" == "fra" ]] && has_fra=true
+    [[ "${lang}" == "eng" ]] && has_eng=true
+  done
+
+  if [[ "${has_fra}" != "true" ]]; then
+    TESSERACT_STATUS="ERROR"
+    TESSERACT_IMPACT="Le pack langue fra manque ; l'usage OCR français nominal est indisponible."
+    OCR_OVERALL_STATUS="ERROR"
+    OCR_FAILURE_REASON="Langue fra absente dans Tesseract."
+    return 1
+  fi
+
+  if [[ "${has_eng}" == "true" ]]; then
+    TESSERACT_IMPACT="OCR prêt pour fra avec fallback eng ; image / PDF scanné exploitables."
+  else
+    TESSERACT_IMPACT="OCR prêt pour fra ; fallback eng absent mais usage français nominal disponible."
+  fi
+
+  if ! validate_ocr_python_runtime_linux; then
+    TESSERACT_IMPACT="Chaîne OCR incomplète ; corrigez le runtime Python avant usage image / PDF scanné."
+    return 1
+  fi
+
+  if [[ "${has_eng}" != "true" ]]; then
+    OCR_OVERALL_STATUS="WARNING"
+  fi
+  return 0
 }
 
 setup_python_env() {
@@ -341,11 +507,16 @@ check_tesseract_linux() {
     done
 
     if [[ "${has_eng}" == "true" && "${has_fra}" == "true" ]]; then
-      TESSERACT_IMPACT="OCR prêt pour eng et fra ; image / PDF scanné utilisables."
+      TESSERACT_IMPACT="Binaire Tesseract prêt avec fra et eng."
+    elif [[ "${has_fra}" == "true" ]]; then
+      TESSERACT_STATUS="WARNING"
+      TESSERACT_IMPACT="Binaire Tesseract prêt avec fra ; fallback eng absent."
     elif [[ "${has_eng}" == "true" ]]; then
-      TESSERACT_IMPACT="OCR disponible avec eng ; installez fra pour un OCR français plus fiable."
+      TESSERACT_STATUS="ERROR"
+      TESSERACT_IMPACT="Tesseract détecté mais fra manque ; OCR français nominal indisponible."
     else
-      TESSERACT_IMPACT="Tesseract détecté, mais le pack eng manque ; OCR à compléter avant usage normal."
+      TESSERACT_STATUS="ERROR"
+      TESSERACT_IMPACT="Tesseract détecté sans fra ; OCR français indisponible."
     fi
   fi
 }
@@ -653,12 +824,12 @@ fi
 
 step "ÉTAPE 1B — Vérification OCR Tesseract"
 check_tesseract_linux
-if [[ "${TESSERACT_STATUS}" == "OK" ]]; then
+if [[ "${TESSERACT_STATUS}" == "OK" || "${TESSERACT_STATUS}" == "WARNING" ]]; then
   info "Tesseract détecté : ${TESSERACT_PATH_DISPLAY}"
   info "Langues Tesseract : ${TESSERACT_LANGS_DISPLAY}"
 else
   warn "Tesseract absent"
-  warn "Les documents image / PDF scannés resteront indisponibles tant que Tesseract n'est pas installé"
+  warn "Les documents image / PDF scannés resteront indisponibles tant que Tesseract et la langue fra ne sont pas installés"
 fi
 
 step "ÉTAPE 2 — Installation / mise à jour contrôlée des modèles"
@@ -1034,7 +1205,18 @@ else
   update_python_status
 fi
 
-step "ÉTAPE 7 — Rapport final"
+step "ÉTAPE 7 — Validation OCR runtime"
+if validate_ocr_linux; then
+  if [[ "${OCR_OVERALL_STATUS}" == "WARNING" ]]; then
+    warn "OCR exploitable avec limitation : ${TESSERACT_IMPACT}"
+  else
+    info "OCR exploitable : chaîne locale validée"
+  fi
+else
+  error "OCR non exploitable : ${OCR_FAILURE_REASON}"
+fi
+
+step "ÉTAPE 8 — Rapport final"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
@@ -1050,7 +1232,14 @@ echo "  OCR :"
 echo "    Tesseract : ${TESSERACT_STATUS}"
 echo "    Chemin    : ${TESSERACT_PATH_DISPLAY}"
 echo "    Langues   : ${TESSERACT_LANGS_DISPLAY}"
+echo "    Imports   : ${OCR_PYTHON_MODULES_STATUS}"
+echo "    Runtime   : ${OCR_RUNTIME_STATUS}"
+echo "    Test OCR  : ${OCR_FUNCTIONAL_TEST_STATUS}"
+echo "    Statut    : ${OCR_OVERALL_STATUS}"
 echo "    Impact    : ${TESSERACT_IMPACT}"
+if [[ -n "${OCR_FAILURE_REASON}" ]]; then
+  echo "    Diagnostic: ${OCR_FAILURE_REASON}"
+fi
 echo ""
 echo "  Python :"
 echo "    Virtualenv       : ${PYTHON_VENV_STATUS}"
@@ -1099,5 +1288,10 @@ echo "  API Ollama : ${OLLAMA_HOST}"
 echo "  Recheck    : ${RECHECK_SCRIPT}"
 echo ""
 
-info "Bootstrap terminé. trusted=${COUNT_TRUSTED} candidate=${COUNT_CANDIDATE} drifted=${COUNT_DRIFTED} quarantine=${COUNT_QUARANTINE}"
+if [[ "${OCR_OVERALL_STATUS}" == "ERROR" ]]; then
+  error "Bootstrap terminé avec échec OCR"
+  exit 1
+fi
+
+info "Bootstrap terminé. trusted=${COUNT_TRUSTED} candidate=${COUNT_CANDIDATE} drifted=${COUNT_DRIFTED} quarantine=${COUNT_QUARANTINE} ocr=${OCR_OVERALL_STATUS}"
 exit 0
