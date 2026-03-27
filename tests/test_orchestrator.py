@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from llm_local_architecture import orchestrator
+from llm_local_architecture.exceptions import OllamaModelNotFoundError
 
 
 class FakeResponse:
@@ -50,6 +51,20 @@ class FakeAsyncClient:
     async def post(self, path: str, json: dict[str, object]) -> FakeResponse:
         self.calls.append(("POST", path, json))
         return self.generate_responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_ollama_404_identified_as_model_not_found(monkeypatch) -> None:
+    """Un 404 Ollama doit lever OllamaModelNotFoundError, pas retourner None."""
+    fake_client = FakeAsyncClient(
+        ps_payloads=[[], [], [], []],
+        generate_responses=[FakeResponse(404, {})],
+    )
+    monkeypatch.setattr(orchestrator.httpx, "AsyncClient", lambda **kwargs: fake_client)
+
+    with pytest.raises(OllamaModelNotFoundError):
+        async with orchestrator.httpx.AsyncClient() as client:
+            await orchestrator._call_ollama(client, "test", "modele-inexistant")
 
 
 @pytest.mark.asyncio
@@ -111,7 +126,6 @@ async def test_generate_with_fallback_retries_with_default_model(monkeypatch) ->
             [],
             [],
             [],
-            [],
         ],
         generate_responses=[
             FakeResponse(200, {"response": ""}),
@@ -150,7 +164,6 @@ async def test_generate_with_fallback_retries_with_default_model(monkeypatch) ->
         ),
         ("GET", "/api/ps", None),
         ("GET", "/api/ps", None),
-        ("GET", "/api/ps", None),
         (
             "POST",
             "/api/generate",
@@ -163,3 +176,30 @@ async def test_generate_with_fallback_retries_with_default_model(monkeypatch) ->
         ),
         ("GET", "/api/ps", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_fallback_logs_error_type(monkeypatch, caplog) -> None:
+    """Le log doit contenir le type d'erreur avant le fallback."""
+    import logging
+
+    fake_client = FakeAsyncClient(
+        ps_payloads=[[], [], [], [], [], []],
+        generate_responses=[
+            FakeResponse(404, {}),
+            FakeResponse(200, {"response": "fallback ok"}),
+        ],
+    )
+    monkeypatch.setattr(orchestrator.httpx, "AsyncClient", lambda **kwargs: fake_client)
+
+    with caplog.at_level(logging.WARNING):
+        response, model, fallback_used = await orchestrator._generate_with_fallback(
+            "Question",
+            "granite3.3:8b",
+        )
+
+    assert response == "fallback ok"
+    assert model == orchestrator.DEFAULT_MODEL
+    assert fallback_used is True
+    assert "OllamaModelNotFoundError" in caplog.text
+    assert "fallback" in caplog.text.lower()
