@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import tempfile
+import unicodedata
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -49,6 +50,18 @@ logger = logging.getLogger(__name__)
 _WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}(?:['’-][A-Za-zÀ-ÖØ-öø-ÿ]{2,})?")
 _TOKEN_RE = re.compile(r"\S+")
 _ABERRANT_CHAR_RE = re.compile(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ\s.,;:!?%/()'\"°@&+\-€$£#_=*]")
+_ADMIN_ANCHORS = (
+    "date",
+    "nom",
+    "montant",
+    "creance",
+    "iban",
+    "bic",
+    "securite sociale",
+    "assurance maladie",
+    "cpam",
+    "notification",
+)
 _COMMON_WORDS = {
     "a",
     "au",
@@ -239,14 +252,9 @@ def _deskew_image(image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     )
 
 
-def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]:
-    color = _ensure_min_size(_pil_to_bgr(image))
-    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
-    denoised = cv2.fastNlMeansDenoising(gray, None, 12, 7, 21)
-    contrast = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(denoised)
-    deskewed = _deskew_image(contrast)
-    padded = cv2.copyMakeBorder(
-        deskewed,
+def _pad_image(image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    return cv2.copyMakeBorder(
+        image,
         18,
         18,
         18,
@@ -255,9 +263,18 @@ def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]
         value=255,
     )
 
-    _, otsu = cv2.threshold(padded, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]:
+    color = _ensure_min_size(_pil_to_bgr(image))
+    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+    denoised = cv2.fastNlMeansDenoising(gray, None, 12, 7, 21)
+    contrast = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(denoised)
+    raw_gray = _pad_image(_deskew_image(gray))
+    contrast_only = _pad_image(_deskew_image(contrast))
+
+    _, otsu = cv2.threshold(contrast_only, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     adaptive = cv2.adaptiveThreshold(
-        padded,
+        contrast_only,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
@@ -272,13 +289,31 @@ def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]
     looks_like_photo = gray_std > 55
     variants = [
         PreprocessedImage(
+            name="raw_gray",
+            image=raw_gray,
+            debug_steps=[
+                ("grayscale", gray),
+                ("raw_gray", raw_gray),
+            ],
+        ),
+        PreprocessedImage(
+            name="contrast_only",
+            image=contrast_only,
+            debug_steps=[
+                ("grayscale", gray),
+                ("denoised", denoised),
+                ("contrast", contrast),
+                ("contrast_only", contrast_only),
+            ],
+        ),
+        PreprocessedImage(
             name="adaptive_open",
             image=opened,
             debug_steps=[
                 ("grayscale", gray),
                 ("denoised", denoised),
                 ("contrast", contrast),
-                ("deskewed", deskewed),
+                ("deskewed", contrast_only),
                 ("adaptive", adaptive),
                 ("adaptive_open", opened),
             ],
@@ -290,20 +325,20 @@ def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]
                 ("grayscale", gray),
                 ("denoised", denoised),
                 ("contrast", contrast),
-                ("deskewed", deskewed),
+                ("deskewed", contrast_only),
                 ("otsu", otsu),
                 ("otsu_close", closed),
             ],
         ),
         PreprocessedImage(
             name="contrast_gray",
-            image=padded,
+            image=contrast_only,
             debug_steps=[
                 ("grayscale", gray),
                 ("denoised", denoised),
                 ("contrast", contrast),
-                ("deskewed", deskewed),
-                ("contrast_gray", padded),
+                ("deskewed", contrast_only),
+                ("contrast_gray", contrast_only),
             ],
         ),
     ]
@@ -317,7 +352,7 @@ def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]
                     ("grayscale", gray),
                     ("denoised", denoised),
                     ("contrast", contrast),
-                    ("deskewed", deskewed),
+                    ("deskewed", contrast_only),
                     ("photo_adaptive", adaptive),
                 ],
             ),
@@ -327,6 +362,8 @@ def _build_preprocessing_variants(image: Image.Image) -> list[PreprocessedImage]
 
 def _psm_sequence() -> list[int]:
     psms = [OCR_TESSERACT_PSM]
+    if 4 not in psms:
+        psms.append(4)
     if OCR_ENABLE_MULTI_PASS and OCR_TESSERACT_SPARSE_PSM not in psms:
         psms.append(OCR_TESSERACT_SPARSE_PSM)
     return psms
@@ -349,6 +386,11 @@ def score_ocr_text(text: str, *, min_text_length: int = OCR_MIN_TEXT_LENGTH, mea
     word_ratio = len(words) / max(len(tokens), 1)
     aberrant_ratio = aberrant_chars / max(total_chars, 1)
     common_word_ratio = common_hits / max(len(words), 1)
+    normalized_match_text = unicodedata.normalize("NFKD", compact.casefold())
+    normalized_match_text = "".join(
+        char for char in normalized_match_text if not unicodedata.combining(char)
+    )
+    anchor_hits = sum(1 for anchor in _ADMIN_ANCHORS if anchor in normalized_match_text)
 
     score = 0.0
     score += min(total_chars / max(min_text_length, 1), 2.0) * 2.5
@@ -356,6 +398,7 @@ def score_ocr_text(text: str, *, min_text_length: int = OCR_MIN_TEXT_LENGTH, mea
     score += word_ratio * 2.5
     score += common_word_ratio * 1.5
     score += max(mean_confidence, 0.0) / 100.0
+    score += min(anchor_hits, 4) * 0.5
     score -= aberrant_ratio * 8.0
     if total_chars < min_text_length:
         score -= 2.5

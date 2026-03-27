@@ -32,10 +32,20 @@ def test_build_preprocessing_variants_upscales_small_images() -> None:
     draw.text((5, 10), "Bonjour", fill="black")
 
     variants = ocr._build_preprocessing_variants(image)
+    variant_names = {variant.name for variant in variants}
 
     assert variants
     assert min(variants[0].image.shape[:2]) >= ocr.OCR_MIN_IMAGE_SIDE
     assert all(variant.image.ndim == 2 for variant in variants)
+    assert {"raw_gray", "contrast_only", "adaptive_open", "otsu_close", "contrast_gray"} <= variant_names
+
+
+def test_psm_sequence_includes_dense_and_layout_modes(monkeypatch) -> None:
+    monkeypatch.setattr(ocr, "OCR_TESSERACT_PSM", 6)
+    monkeypatch.setattr(ocr, "OCR_TESSERACT_SPARSE_PSM", 11)
+    monkeypatch.setattr(ocr, "OCR_ENABLE_MULTI_PASS", True)
+
+    assert ocr._psm_sequence() == [6, 4, 11]
 
 
 def test_extract_text_from_images_prefers_fallback_language(monkeypatch) -> None:
@@ -80,3 +90,14 @@ def test_select_languages_errors_when_requested_packs_are_missing(monkeypatch) -
 
     with pytest.raises(RuntimeError, match="Packs langue Tesseract manquants"):
         ocr._select_languages()
+
+
+def test_score_ocr_text_rewards_administrative_anchors() -> None:
+    anchored = "Notification CPAM assurance maladie. Date 12/03/2026. Montant 123,45 EUR. IBAN FR76."
+    plain = "Texte lisible avec plusieurs mots utiles et une structure assez propre pour un OCR."
+
+    assert ocr.score_ocr_text(anchored, min_text_length=20, mean_confidence=60.0) > ocr.score_ocr_text(
+        plain,
+        min_text_length=20,
+        mean_confidence=60.0,
+    )

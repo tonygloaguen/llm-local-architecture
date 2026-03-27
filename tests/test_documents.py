@@ -1,5 +1,4 @@
 from pathlib import Path
-
 from llm_local_architecture import documents
 from llm_local_architecture.documents import _detect_source_type
 
@@ -66,6 +65,48 @@ def test_process_image_uses_ocr(tmp_path: Path, monkeypatch) -> None:
     result = documents.process_document_bytes("scan.png", image_bytes, "image/png")
     assert result.ocr_used is True
     assert result.extraction_method == "image_ocr"
+
+
+def test_process_image_applies_exif_transpose_and_rgb_conversion(tmp_path: Path, monkeypatch) -> None:
+    class FakeImage:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        def convert(self, mode: str) -> "FakeImage":
+            assert mode == "RGB"
+            return FakeImage(f"{self.label}-rgb")
+
+    opened = FakeImage("opened")
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(documents, "ensure_storage", lambda: None)
+    monkeypatch.setattr(documents, "build_document_path", lambda filename: ("doc-rgb", tmp_path / filename))
+    monkeypatch.setattr(documents, "build_text_artifact_path", lambda document_id: tmp_path / f"{document_id}.txt")
+    monkeypatch.setattr(documents.Image, "open", lambda payload: opened)
+
+    def fake_exif_transpose(image: FakeImage) -> FakeImage:
+        assert image is opened
+        return FakeImage("transposed")
+
+    monkeypatch.setattr(documents.ImageOps, "exif_transpose", fake_exif_transpose)
+
+    def fake_extract_text(images: list[object]) -> str:
+        seen["image"] = images[0]
+        return "Texte OCR"
+
+    monkeypatch.setattr(documents, "extract_text_from_images", fake_extract_text)
+
+    image_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00"
+        b"\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    result = documents.process_document_bytes("scan.png", image_bytes, "image/png")
+
+    assert isinstance(seen["image"], FakeImage)
+    assert seen["image"].label == "transposed-rgb"
+    assert result.structured_fields.date == "non trouvé"
 
 
 def test_process_pdf_falls_back_to_ocr_when_direct_text_is_too_short(tmp_path: Path, monkeypatch) -> None:
