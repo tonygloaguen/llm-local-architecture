@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .config import DOCUMENT_EXCERPT_CHARS, MAX_CONTEXT_CHARS, ROUTING_EXCERPT_CHARS
+from .config import DOCUMENT_EXCERPT_CHARS, ROUTING_EXCERPT_CHARS
 from .schemas import MemoryBundle, ProcessedDocument
 
 
@@ -45,23 +45,45 @@ def build_generation_prompt(
     memory: MemoryBundle,
     input_type: str = "text",
 ) -> tuple[str, list[str]]:
-    """Construit le prompt final envoyé à Ollama."""
+    """Construit le prompt final envoyé à Ollama.
+
+    Ordre de priorité (jamais tronqué -> tronqué en dernier) :
+      1. system (fixe)
+      2. user_message (protégé)
+      3. history
+      4. document + rules
+      5. preferences
+    """
+    from .config import HISTORY_MAX_CHARS  # noqa: PLC0415
+
     sources = list(memory.sources)
-    user_prompt = prompt.strip() or "Résume le document fourni, identifie son type, puis réponds de manière structurée."
-    sections = ["Tu es un assistant local exécuté hors ligne."]
+    user_message = prompt.strip() or "Résume le document fourni, identifie son type, puis réponds de manière structurée."
+    sections = ["Tu es un assistant local exécuté hors ligne.", f"Demande utilisateur:\n{user_message}"]
 
     if memory.short_term_text:
-        sections.append(f"Historique de session récent:\n{_clip(memory.short_term_text, 2000)}")
+        sections.append(f"Historique de session récent:\n{_clip(memory.short_term_text, HISTORY_MAX_CHARS)}")
 
     if document is not None:
         document_heading = "Texte OCR prioritaire" if input_type in {"document", "text+document"} else "Document courant"
-        sections.append(
+        doc_text = document.text.strip()
+        truncated = False
+        if len(doc_text) > DOCUMENT_EXCERPT_CHARS:
+            doc_text = doc_text[:DOCUMENT_EXCERPT_CHARS].rstrip()
+            truncated = True
+
+        doc_block = (
             f"{document_heading}:\n"
             f"nom={document.filename}\n"
             f"type={document.source_type}\n"
             f"ocr_used={document.ocr_used}\n"
             f"extraction={document.extraction_method}\n"
-            f"contenu=\n{_clip(document.text, DOCUMENT_EXCERPT_CHARS)}"
+            f"contenu=\n{doc_text}"
+        )
+        if truncated:
+            doc_block += "\n[... DOCUMENT TRONQUÉ — suite omise pour respecter la limite de contexte ...]"
+
+        sections.append(
+            doc_block
         )
         sections.append(
             "Règles de réponse documentaires:\n"
@@ -72,10 +94,8 @@ def build_generation_prompt(
         if "documentary" not in sources:
             sources.append("documentary")
 
-    sections.append(f"Demande utilisateur:\n{user_prompt}")
-
     if memory.preferences_text:
-        sections.append(f"Préférences utilisateur:\n{memory.preferences_text}")
+        sections.append(f"Préférences utilisateur:\n{_clip(memory.preferences_text, 500)}")
 
     prompt_text = "\n\n".join(sections)
-    return _clip(prompt_text, MAX_CONTEXT_CHARS), sources
+    return prompt_text, sources

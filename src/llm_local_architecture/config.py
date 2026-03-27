@@ -45,6 +45,7 @@ STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 # Réglages mémoire / contexte
 SHORT_TERM_MESSAGE_LIMIT: int = _get_int("SHORT_TERM_MESSAGE_LIMIT", 8)
 MAX_CONTEXT_CHARS: int = _get_int("MAX_CONTEXT_CHARS", 12000)
+HISTORY_MAX_CHARS: int = _get_int("HISTORY_MAX_CHARS", 1500)
 DOCUMENT_EXCERPT_CHARS: int = _get_int("DOCUMENT_EXCERPT_CHARS", 6000)
 ROUTING_EXCERPT_CHARS: int = _get_int("ROUTING_EXCERPT_CHARS", 1200)
 
