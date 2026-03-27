@@ -1,0 +1,102 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /home/gloaguen/projets/llm-local-architecture/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/gloaguen/projets/llm-local-architecture
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 70 items
+
+tests/test_api_integration.py::test_health_returns_200 PASSED            [  1%]
+tests/test_api_integration.py::test_chat_text_only_returns_200 PASSED    [  2%]
+tests/test_api_integration.py::test_chat_empty_payload_returns_400 PASSED [  4%]
+tests/test_api_integration.py::test_chat_empty_document_returns_400 PASSED [  5%]
+tests/test_api_integration.py::test_route_endpoint_returns_model PASSED  [  7%]
+tests/test_api_integration.py::test_route_endpoint_override PASSED       [  8%]
+tests/test_documents.py::test_determine_input_type PASSED                [ 10%]
+tests/test_documents.py::test_should_use_ocr PASSED                      [ 11%]
+tests/test_documents.py::test_pdf_detected_by_magic_bytes_no_extension PASSED [ 12%]
+tests/test_documents.py::test_jpeg_detected_by_magic_bytes PASSED        [ 14%]
+tests/test_documents.py::test_unknown_type_returns_unknown PASSED        [ 15%]
+tests/test_documents.py::test_text_file_detected_by_extension_fallback PASSED [ 17%]
+tests/test_documents.py::test_process_pdf_prefers_direct_text PASSED     [ 18%]
+tests/test_documents.py::test_process_image_uses_ocr PASSED              [ 20%]
+tests/test_documents.py::test_process_pdf_falls_back_to_ocr_when_direct_text_is_too_short PASSED [ 21%]
+tests/test_documents.py::test_process_text_file_without_ocr PASSED       [ 22%]
+tests/test_documents.py::test_process_dockerfile_without_ocr PASSED      [ 24%]
+tests/test_documents.py::test_process_pdf_without_extension_detected_by_magic_bytes PASSED [ 25%]
+tests/test_documents.py::test_process_pdf_empty_after_extraction_is_graceful PASSED [ 27%]
+tests/test_memory.py::test_memory_roundtrip PASSED                       [ 28%]
+tests/test_ocr.py::test_score_ocr_text_prefers_clean_text PASSED         [ 30%]
+tests/test_ocr.py::test_build_preprocessing_variants_upscales_small_images PASSED [ 31%]
+tests/test_ocr.py::test_extract_text_from_images_prefers_fallback_language PASSED [ 32%]
+tests/test_ocr.py::test_extract_text_from_images_errors_when_tesseract_missing PASSED [ 34%]
+tests/test_ocr.py::test_select_languages_errors_when_requested_packs_are_missing PASSED [ 35%]
+tests/test_orchestrator.py::test_ollama_404_identified_as_model_not_found PASSED [ 37%]
+tests/test_orchestrator.py::test_generate_with_fallback_stops_other_resident_models PASSED [ 38%]
+tests/test_orchestrator.py::test_generate_with_fallback_retries_with_default_model PASSED [ 40%]
+tests/test_orchestrator.py::test_fallback_logs_error_type PASSED         [ 41%]
+tests/test_prompting.py::test_build_generation_prompt_prioritizes_document_text_for_document_inputs PASSED [ 42%]
+tests/test_prompting.py::test_build_generation_prompt_uses_user_prompt_only_for_text_inputs PASSED [ 44%]
+tests/test_prompting.py::test_user_message_never_truncated_with_huge_document PASSED [ 45%]
+tests/test_prompting.py::test_truncation_marker_present_when_doc_exceeds_budget PASSED [ 47%]
+tests/test_prompting.py::test_user_message_appears_before_document_section PASSED [ 48%]
+tests/test_prompting.py::test_short_document_not_truncated PASSED        [ 50%]
+tests/test_router.py::test_route[Audite ce Dockerfile-granite3.3:8b] PASSED [ 51%]
+tests/test_router.py::test_route[Revue de s\xe9curit\xe9 du pipeline CI/CD-granite3.3:8b] PASSED [ 52%]
+tests/test_router.py::test_route[Trivy scan results show CVE-2023-1234-granite3.3:8b] PASSED [ 54%]
+tests/test_router.py::test_route[Hardening de ce serveur nginx-granite3.3:8b] PASSED [ 55%]
+tests/test_router.py::test_route[Scan gitleaks sur ce repo-granite3.3:8b] PASSED [ 57%]
+tests/test_router.py::test_route[Checkov rapport sur ce compose-granite3.3:8b] PASSED [ 58%]
+tests/test_router.py::test_route[G\xe9n\xe8re un module FastAPI avec async def-qwen2.5-coder:7b-instruct] PASSED [ 60%]
+tests/test_router.py::test_route[Impl\xe9mente cette classe Python-qwen2.5-coder:7b-instruct] PASSED [ 61%]
+tests/test_router.py::test_route[Refactor ce script bash-qwen2.5-coder:7b-instruct] PASSED [ 62%]
+tests/test_router.py::test_route[```python\ndef foo(): pass-qwen2.5-coder:7b-instruct] PASSED [ 64%]
+tests/test_router.py::test_route[G\xe9n\xe8re le code pour ce module pytest-qwen2.5-coder:7b-instruct] PASSED [ 65%]
+tests/test_router.py::test_route[Planifie les \xe9tapes de ce workflow-deepseek-r1:7b] PASSED [ 67%]
+tests/test_router.py::test_route[D\xe9compose cette architecture en modules-deepseek-r1:7b] PASSED [ 68%]
+tests/test_router.py::test_route[Strat\xe9gie de migration de base de donn\xe9es-deepseek-r1:7b] PASSED [ 70%]
+tests/test_router.py::test_route[Root cause analysis de cet incident-deepseek-r1:7b] PASSED [ 71%]
+tests/test_router.py::test_route[R\xe9dige un mail professionnel pour ce client-mistral:7b-instruct-v0.3-q4_K_M] PASSED [ 72%]
+tests/test_router.py::test_route[Synth\xe8se de ce document technique-mistral:7b-instruct-v0.3-q4_K_M] PASSED [ 74%]
+tests/test_router.py::test_route[Reformule ce compte rendu de r\xe9union-mistral:7b-instruct-v0.3-q4_K_M] PASSED [ 75%]
+tests/test_router.py::test_route[traceback RuntimeError dans ce script-phi4-mini] PASSED [ 77%]
+tests/test_router.py::test_route[Sanity check rapide de cette config-phi4-mini] PASSED [ 78%]
+tests/test_router.py::test_route[Exception KeyError line 42-phi4-mini] PASSED [ 80%]
+tests/test_router.py::test_route[Bonjour-phi4-mini] PASSED               [ 81%]
+tests/test_router.py::test_route[42-phi4-mini] PASSED                    [ 82%]
+tests/test_router.py::test_route[-phi4-mini] PASSED                      [ 84%]
+tests/test_router.py::test_route_priority_audit_over_code PASSED         [ 85%]
+tests/test_router.py::test_route_returns_str PASSED                      [ 87%]
+tests/test_router.py::test_route_case_insensitive PASSED                 [ 88%]
+tests/test_router.py::test_route_nonempty_result PASSED                  [ 90%]
+tests/test_router.py::test_router_false_positive_code_postal PASSED      [ 91%]
+tests/test_router.py::test_router_false_positive_fonction_medicament PASSED [ 92%]
+tests/test_router.py::test_router_isolation_from_document_markers PASSED [ 94%]
+tests/test_router.py::test_router_code_python_still_routes_to_qwen PASSED [ 95%]
+tests/test_smoke.py::test_package_name PASSED                            [ 97%]
+tests/test_web_app.py::test_chat_text_only PASSED                        [ 98%]
+tests/test_web_app.py::test_chat_requires_prompt_or_document PASSED      [100%]
+
+=============================== warnings summary ===============================
+src/llm_local_architecture/orchestrator.py:90
+  /home/gloaguen/projets/llm-local-architecture/src/llm_local_architecture/orchestrator.py:90: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+.venv/lib/python3.12/site-packages/fastapi/applications.py:4598
+  /home/gloaguen/projets/llm-local-architecture/.venv/lib/python3.12/site-packages/fastapi/applications.py:4598: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 70 passed, 2 warnings in 0.84s ========================

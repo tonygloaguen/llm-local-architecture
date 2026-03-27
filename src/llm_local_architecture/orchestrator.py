@@ -38,6 +38,13 @@ from .config import (
     STATIC_DIR,
 )
 from .documents import determine_input_type, process_document_bytes
+from .exceptions import (
+    OllamaError,
+    OllamaGenerationError,
+    OllamaModelNotFoundError,
+    OllamaTimeoutError,
+    OllamaUnavailableError,
+)
 from .memory import (
     build_memory_bundle,
     ensure_session,
@@ -45,7 +52,7 @@ from .memory import (
     save_document,
     save_message,
 )
-from .prompting import build_generation_prompt, build_routing_text
+from .prompting import build_generation_prompt
 from .router import route
 from .schemas import ChatResponse
 from .storage import ensure_storage
@@ -181,8 +188,7 @@ async def chat(
 
     input_type = determine_input_type(normalized_prompt, processed_document is not None)
     memory = build_memory_bundle(active_session_id, document_id)
-    routing_text = build_routing_text(effective_prompt, processed_document, memory)
-    selected_model = route(routing_text)
+    selected_model = route(effective_prompt)
     generation_prompt, memory_sources = build_generation_prompt(
         effective_prompt,
         processed_document,
@@ -223,11 +229,8 @@ async def _call_ollama(
     client: httpx.AsyncClient,
     prompt: str,
     model: str,
-) -> str | None:
-    """Appelle /api/generate sur Ollama.
-
-    Retourne None si le modèle n'existe pas (404) ou si Ollama est injoignable.
-    """
+) -> str:
+    """Appelle /api/generate sur Ollama. Lève une exception typée en cas d'erreur."""
     try:
         resp = await client.post(
             "/api/generate",
@@ -239,11 +242,17 @@ async def _call_ollama(
             },
         )
         if resp.status_code == 404:  # noqa: PLR2004
-            return None
+            raise OllamaModelNotFoundError(f"Modèle '{model}' absent d'Ollama (404)")
         resp.raise_for_status()
         return resp.json().get("response", "")  # type: ignore[no-any-return]
-    except httpx.HTTPError:
-        return None
+    except OllamaModelNotFoundError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise OllamaTimeoutError(f"Timeout lors de la génération avec '{model}'") from exc
+    except httpx.ConnectError as exc:
+        raise OllamaUnavailableError(f"Ollama inaccessible sur {OLLAMA_BASE_URL}") from exc
+    except httpx.HTTPError as exc:
+        raise OllamaGenerationError(f"Erreur HTTP inattendue avec '{model}': {exc}") from exc
 
 
 async def _list_loaded_models(client: httpx.AsyncClient) -> list[str]:
@@ -316,42 +325,51 @@ async def _prepare_model_execution(client: httpx.AsyncClient, selected_model: st
     )
 
 
-async def _run_model_generation(
-    client: httpx.AsyncClient,
-    prompt: str,
-    model: str,
-) -> str | None:
-    """Prépare l'exécution d'un modèle puis journalise l'état final."""
-    await _prepare_model_execution(client, model)
-    response_text = await _call_ollama(client, prompt, model)
-    loaded_models = await _list_loaded_models(client)
-    logger.info(
-        "Ollama selected_model=%s ps_after_generate=%s generation_status=%s",
-        model,
-        _format_loaded_models(loaded_models),
-        "ok" if response_text is not None else "missing_or_unreachable",
-    )
-    return response_text
-
-
 async def _generate_with_fallback(prompt: str, selected_model: str) -> tuple[str, str, bool]:
     """Génère une réponse avec fallback éventuel sur le modèle par défaut."""
     async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=120.0) as client:
-        response_text = await _run_model_generation(client, prompt, selected_model)
-        if response_text is not None:
-            return response_text, selected_model, False
-
-        if selected_model != DEFAULT_MODEL:
-            fallback_text = await _run_model_generation(client, prompt, DEFAULT_MODEL)
-            if fallback_text is not None:
-                return fallback_text, DEFAULT_MODEL, True
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"Modèle {selected_model} et fallback {DEFAULT_MODEL} inaccessibles. "
-                    f"Vérifiez qu'Ollama tourne sur {OLLAMA_BASE_URL}."
-                ),
+        try:
+            await _prepare_model_execution(client, selected_model)
+            response_text = await _call_ollama(client, prompt, selected_model)
+            loaded_models = await _list_loaded_models(client)
+            logger.info(
+                "Ollama selected_model=%s ps_after_generate=%s generation_status=ok",
+                selected_model,
+                _format_loaded_models(loaded_models),
             )
+            return response_text, selected_model, False
+        except OllamaError as exc:
+            logger.warning(
+                "Ollama error: model=%s error_type=%s reason=%s",
+                selected_model,
+                type(exc).__name__,
+                str(exc),
+            )
+            if selected_model == DEFAULT_MODEL:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Modèle par défaut {DEFAULT_MODEL} inaccessible: {exc}",
+                ) from exc
+
+            logger.warning("Ollama fallback: %s → %s", selected_model, DEFAULT_MODEL)
+            try:
+                await _prepare_model_execution(client, DEFAULT_MODEL)
+                fallback_text = await _call_ollama(client, prompt, DEFAULT_MODEL)
+                loaded_models = await _list_loaded_models(client)
+                logger.info(
+                    "Ollama selected_model=%s ps_after_generate=%s generation_status=ok",
+                    DEFAULT_MODEL,
+                    _format_loaded_models(loaded_models),
+                )
+                return fallback_text, DEFAULT_MODEL, True
+            except OllamaError as fallback_exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"Modèle {selected_model} ({type(exc).__name__}) "
+                        f"et fallback {DEFAULT_MODEL} ({type(fallback_exc).__name__}) inaccessibles."
+                    ),
+                ) from fallback_exc
 
         raise HTTPException(
             status_code=503,

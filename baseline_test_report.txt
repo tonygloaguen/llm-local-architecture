@@ -1,0 +1,57 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/gloaguen/projets/llm-local-architecture
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 37 items / 3 errors
+
+==================================== ERRORS ====================================
+___________________ ERROR collecting tests/test_documents.py ___________________
+ImportError while importing test module '/home/gloaguen/projets/llm-local-architecture/tests/test_documents.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_documents.py:3: in <module>
+    from llm_local_architecture import documents
+src/llm_local_architecture/documents.py:10: in <module>
+    from pypdf import PdfReader
+E   ModuleNotFoundError: No module named 'pypdf'
+_________________ ERROR collecting tests/test_orchestrator.py __________________
+ImportError while importing test module '/home/gloaguen/projets/llm-local-architecture/tests/test_orchestrator.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_orchestrator.py:10: in <module>
+    from llm_local_architecture import orchestrator
+src/llm_local_architecture/orchestrator.py:40: in <module>
+    from .documents import determine_input_type, process_document_bytes
+src/llm_local_architecture/documents.py:10: in <module>
+    from pypdf import PdfReader
+E   ModuleNotFoundError: No module named 'pypdf'
+____________________ ERROR collecting tests/test_web_app.py ____________________
+ImportError while importing test module '/home/gloaguen/projets/llm-local-architecture/tests/test_web_app.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_web_app.py:8: in <module>
+    from llm_local_architecture import orchestrator
+src/llm_local_architecture/orchestrator.py:40: in <module>
+    from .documents import determine_input_type, process_document_bytes
+src/llm_local_architecture/documents.py:10: in <module>
+    from pypdf import PdfReader
+E   ModuleNotFoundError: No module named 'pypdf'
+=========================== short test summary info ============================
+ERROR tests/test_documents.py
+ERROR tests/test_orchestrator.py
+ERROR tests/test_web_app.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+============================== 3 errors in 0.45s ===============================

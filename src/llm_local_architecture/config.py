@@ -45,6 +45,7 @@ STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 # Réglages mémoire / contexte
 SHORT_TERM_MESSAGE_LIMIT: int = _get_int("SHORT_TERM_MESSAGE_LIMIT", 8)
 MAX_CONTEXT_CHARS: int = _get_int("MAX_CONTEXT_CHARS", 12000)
+HISTORY_MAX_CHARS: int = _get_int("HISTORY_MAX_CHARS", 1500)
 DOCUMENT_EXCERPT_CHARS: int = _get_int("DOCUMENT_EXCERPT_CHARS", 6000)
 ROUTING_EXCERPT_CHARS: int = _get_int("ROUTING_EXCERPT_CHARS", 1200)
 
@@ -60,6 +61,7 @@ OCR_ENABLE_MULTI_PASS: bool = _get_bool("OCR_ENABLE_MULTI_PASS", True)
 OCR_MIN_TEXT_LENGTH: int = _get_int("OCR_MIN_TEXT_LENGTH", 20)
 OCR_MIN_EXTRACTED_CHARS: int = _get_int("OCR_MIN_EXTRACTED_CHARS", 80)
 OCR_DPI: int = _get_int("OCR_DPI", 200)
+PDF_MAX_PAGES: int = _get_int("PDF_MAX_PAGES", 50)
 OCR_DEBUG_SAVE_INTERMEDIATES: bool = _get_bool("OCR_DEBUG_SAVE_INTERMEDIATES", False)
 OCR_MIN_IMAGE_SIDE: int = _get_int("OCR_MIN_IMAGE_SIDE", 1400)
 TESSERACT_CMD: str = os.getenv("OCR_TESSERACT_CMD", os.getenv("TESSERACT_CMD", ""))
@@ -156,13 +158,15 @@ ROUTING_RULES: list[dict[str, Any]] = [
             "implémente",
             ".py",
             "def ",
+            "fonction python",
             "class ",
             "import ",
             "```python",
-            "code",
-            "fonction",
+            "code python",
+            "bout de code",
             "function",
-            "programme",
+            "programme python",
+            "script python",
         ],
     },
     {
