@@ -31,12 +31,12 @@ _MAGIC_TIFF2 = b"MM\x00*"
 logger = logging.getLogger(__name__)
 
 
-def determine_input_type(prompt: str, has_document: bool) -> str:
+def determine_input_type(prompt: str, has_document: bool, use_document: bool = True) -> str:
     """Retourne le type d'entrée global de la requête."""
     has_prompt = bool(prompt.strip())
-    if has_prompt and has_document:
+    if has_prompt and has_document and use_document:
         return "text+document"
-    if has_document:
+    if has_document and use_document:
         return "document"
     return "text"
 
