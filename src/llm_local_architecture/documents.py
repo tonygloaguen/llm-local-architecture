@@ -6,11 +6,12 @@ from io import BytesIO
 import logging
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 from pypdf import PdfReader
 import pypdfium2 as pdfium
 
 from .config import OCR_DPI, OCR_ENABLED, OCR_MIN_EXTRACTED_CHARS, PDF_MAX_PAGES
+from .extractors import extract_structured_fields
 from .ocr import extract_text_from_images
 from .schemas import ProcessedDocument
 from .storage import build_document_path, build_text_artifact_path, ensure_storage
@@ -135,6 +136,8 @@ def process_document_bytes(
     elif detected_source_type == "image":
         source_type = "image"
         image = Image.open(BytesIO(payload))
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
         if not OCR_ENABLED:
             raise RuntimeError("OCR désactivé alors qu'un document image a été fourni.")
         extracted_text = extract_text_from_images([image])
@@ -163,6 +166,7 @@ def process_document_bytes(
 
     extracted_path = build_text_artifact_path(document_id)
     extracted_path.write_text(extracted_text, encoding="utf-8")
+    structured_fields = extract_structured_fields(extracted_text)
 
     return ProcessedDocument(
         document_id=document_id,
@@ -175,4 +179,5 @@ def process_document_bytes(
         text=extracted_text,
         ocr_used=ocr_used,
         page_count=page_count,
+        structured_fields=structured_fields,
     )

@@ -44,3 +44,21 @@ def test_chat_requires_prompt_or_document(monkeypatch) -> None:
         response = client.post("/chat", data={"prompt": ""})
 
     assert response.status_code == 400
+
+
+def test_lifespan_runs_startup_and_shutdown(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_startup() -> None:
+        calls.append("startup")
+
+    async def fake_shutdown() -> None:
+        calls.append("shutdown")
+
+    monkeypatch.setattr(orchestrator, "_startup", fake_startup)
+    monkeypatch.setattr(orchestrator, "_shutdown", fake_shutdown)
+
+    with TestClient(orchestrator.app):
+        assert calls == ["startup"]
+
+    assert calls == ["startup", "shutdown"]

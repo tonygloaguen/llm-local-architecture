@@ -13,6 +13,12 @@ def _clip(text: str, limit: int) -> str:
     return normalized[:limit].rstrip() + "..."
 
 
+def _format_structured_fields(document: ProcessedDocument) -> str:
+    fields = document.structured_fields.as_dict()
+    lines = [f"{key}={value}" for key, value in fields.items()]
+    return "Champs structurés extraits localement:\n" + "\n".join(lines)
+
+
 def build_routing_text(
     prompt: str,
     document: ProcessedDocument | None,
@@ -85,9 +91,10 @@ def build_generation_prompt(
         sections.append(
             doc_block
         )
+        sections.append(_format_structured_fields(document))
         sections.append(
             "Règles de réponse documentaires:\n"
-            "Réponds uniquement à partir du texte OCR/extrait ci-dessus.\n"
+            "Réponds uniquement à partir du texte OCR/extrait et des champs structurés ci-dessus.\n"
             "N'invente rien et n'utilise aucune connaissance externe.\n"
             "Si l'information demandée n'est pas présente dans ce texte, réponds qu'elle est absente du document."
         )

@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from llm_local_architecture.prompting import build_generation_prompt
-from llm_local_architecture.schemas import MemoryBundle, ProcessedDocument
+from llm_local_architecture.schemas import MemoryBundle, ProcessedDocument, StructuredDocumentFields
 
 
 def _document(*, text: str, ocr_used: bool = True) -> ProcessedDocument:
@@ -19,6 +19,10 @@ def _document(*, text: str, ocr_used: bool = True) -> ProcessedDocument:
         text=text,
         ocr_used=ocr_used,
         page_count=1,
+        structured_fields=StructuredDocumentFields(
+            date="12/03/2026",
+            nom="JEAN DUPONT",
+        ),
     )
 
 
@@ -32,7 +36,9 @@ def test_build_generation_prompt_prioritizes_document_text_for_document_inputs()
 
     assert "Texte OCR prioritaire:" in prompt_text
     assert "contenu=\nPremier point\nDeuxième point" in prompt_text
-    assert "Réponds uniquement à partir du texte OCR/extrait ci-dessus." in prompt_text
+    assert "Champs structurés extraits localement:" in prompt_text
+    assert "nom=JEAN DUPONT" in prompt_text
+    assert "Réponds uniquement à partir du texte OCR/extrait et des champs structurés ci-dessus." in prompt_text
     assert prompt_text.index("Demande utilisateur:") < prompt_text.index("Texte OCR prioritaire:")
     assert "documentary" in sources
 

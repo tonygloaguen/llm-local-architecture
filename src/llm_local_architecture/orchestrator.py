@@ -18,10 +18,11 @@ Endpoints disponibles :
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -57,13 +58,35 @@ from .router import route
 from .schemas import ChatResponse
 from .storage import ensure_storage
 
+logger = logging.getLogger(__name__)
+
+async def _startup() -> None:
+    """Initialise le stockage local au démarrage."""
+    ensure_storage()
+    initialize_database()
+
+
+async def _shutdown() -> None:
+    """Réservé aux nettoyages futurs lors de l'arrêt de l'application."""
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Encadre le cycle de vie de l'application FastAPI."""
+    del app
+    await _startup()
+    try:
+        yield
+    finally:
+        await _shutdown()
+
+
 app = FastAPI(
     title="LLM Local Orchestrator",
     version="0.1.0",
     description="Routeur déterministe vers les modèles Ollama locaux.",
+    lifespan=lifespan,
 )
-
-logger = logging.getLogger(__name__)
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -85,13 +108,6 @@ class PromptResponse(BaseModel):
     model: str
     routed_by: str  # "auto" | "override" | "fallback:<model>"
     response: str
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    """Initialise le stockage local au démarrage."""
-    ensure_storage()
-    initialize_database()
 
 
 @app.get("/", include_in_schema=False)
