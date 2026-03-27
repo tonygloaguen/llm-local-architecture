@@ -19,6 +19,7 @@ def build_routing_text(
     memory: MemoryBundle,
 ) -> str:
     """Construit un texte de routage explicable à partir du contexte courant."""
+    # NOTE: plus utilisée pour le routing depuis LOT 1 — conservée pour debug.
     effective_prompt = prompt.strip() or "Resume le document fourni et reponds de maniere structuree."
     parts: list[str] = [effective_prompt]
 

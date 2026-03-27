@@ -45,7 +45,7 @@ from .memory import (
     save_document,
     save_message,
 )
-from .prompting import build_generation_prompt, build_routing_text
+from .prompting import build_generation_prompt
 from .router import route
 from .schemas import ChatResponse
 from .storage import ensure_storage
@@ -181,8 +181,7 @@ async def chat(
 
     input_type = determine_input_type(normalized_prompt, processed_document is not None)
     memory = build_memory_bundle(active_session_id, document_id)
-    routing_text = build_routing_text(effective_prompt, processed_document, memory)
-    selected_model = route(routing_text)
+    selected_model = route(effective_prompt)
     generation_prompt, memory_sources = build_generation_prompt(
         effective_prompt,
         processed_document,

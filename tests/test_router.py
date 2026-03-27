@@ -71,3 +71,31 @@ def test_route_nonempty_result() -> None:
     """Le routeur ne retourne jamais une chaîne vide."""
     assert route("") != ""
     assert route("   ") != ""
+
+
+def test_router_false_positive_code_postal() -> None:
+    """'code' seul dans une phrase courante ne doit pas router vers qwen."""
+    result = route("Quel est le code postal de Lyon ?")
+    assert result != "qwen2.5-coder:7b-instruct"
+
+
+def test_router_false_positive_fonction_medicament() -> None:
+    """'fonction' biologique/administrative ne doit pas router vers qwen."""
+    result = route("Quelle est la fonction de ce médicament ?")
+    assert result != "qwen2.5-coder:7b-instruct"
+
+
+def test_router_isolation_from_document_markers() -> None:
+    """Le routeur ne doit pas être influencé par les marqueurs documentaires."""
+    polluted = "document_uploaded document_type:pdf audit dockerfile cve trivy"
+    neutral_prompt = "Quand expire mon contrat ?"
+    assert polluted != neutral_prompt
+    assert route(neutral_prompt) != "granite3.3:8b"
+
+
+def test_router_code_python_still_routes_to_qwen() -> None:
+    """Après correction, le code Python légitime route toujours vers qwen."""
+    assert route("Génère un module FastAPI avec async def") == "qwen2.5-coder:7b-instruct"
+    assert route("Implémente cette classe Python") == "qwen2.5-coder:7b-instruct"
+    assert route("Génère le code pour ce module pytest") == "qwen2.5-coder:7b-instruct"
+    assert route("def foo(): pass") == "qwen2.5-coder:7b-instruct"
