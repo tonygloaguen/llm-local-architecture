@@ -53,7 +53,7 @@ from .memory import (
     save_document,
     save_message,
 )
-from .prompting import build_generation_prompt
+from .prompting import build_generation_prompt, classify_user_intent
 from .router import route
 from .schemas import ChatResponse
 from .storage import ensure_storage
@@ -183,10 +183,27 @@ async def chat(
         raise HTTPException(status_code=400, detail="Prompt ou document requis.")
 
     effective_prompt = normalized_prompt or "Résume le document fourni et réponds de manière structurée."
+    intent = classify_user_intent(effective_prompt, document is not None)
 
     active_session_id = ensure_session(session_id)
     processed_document = None
     document_id: str | None = None
+
+    if document is None and intent.document_policy == "document_required":
+        response_text = "Aucun document fourni. Impossible de répondre."
+        save_message(active_session_id, "user", normalized_prompt)
+        save_message(active_session_id, "assistant", response_text)
+        return ChatResponse(
+            session_id=active_session_id,
+            model="guardrail",
+            routed_by="guardrail:missing_document",
+            response=response_text,
+            input_type="text",
+            ocr_used=False,
+            document_id=None,
+            memory_sources=[],
+            extraction_method=None,
+        )
 
     if document is not None and document.filename:
         payload = await document.read()
@@ -202,14 +219,17 @@ async def chat(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         document_id = save_document(active_session_id, processed_document)
 
-    input_type = determine_input_type(normalized_prompt, processed_document is not None)
+    use_document = processed_document is not None and intent.use_document
+    active_document = processed_document if use_document else None
+    input_type = determine_input_type(normalized_prompt, processed_document is not None, use_document=use_document)
     memory = build_memory_bundle(active_session_id, document_id)
     selected_model = route(effective_prompt)
     generation_prompt, memory_sources = build_generation_prompt(
         effective_prompt,
-        processed_document,
+        active_document,
         memory,
         input_type=input_type,
+        intent=intent,
     )
     logger.debug("Chat final_prompt=%r", generation_prompt)
 

@@ -8,6 +8,16 @@ from pydantic import BaseModel
 
 
 @dataclass(slots=True)
+class UserIntent:
+    """Intention utilisateur inférée localement avant appel au LLM."""
+
+    category: str = "qa_simple"
+    document_policy: str = "document_optional"
+    use_document: bool = False
+    concise: bool = True
+
+
+@dataclass(slots=True)
 class StructuredDocumentFields:
     """Champs extraits localement pour compléter un texte OCR brut."""
 

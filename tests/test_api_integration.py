@@ -55,6 +55,16 @@ async def test_chat_text_only_returns_200(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_document_required_without_document_returns_guardrail(client) -> None:
+    resp = await client.post("/chat", data={"prompt": "Résume ce courrier"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["response"] == "Aucun document fourni. Impossible de répondre."
+    assert body["model"] == "guardrail"
+    assert body["routed_by"] == "guardrail:missing_document"
+
+
+@pytest.mark.asyncio
 async def test_chat_empty_payload_returns_400(client) -> None:
     resp = await client.post("/chat", data={})
     assert resp.status_code == 400

@@ -7,6 +7,7 @@ def test_determine_input_type() -> None:
     assert documents.determine_input_type("hello", False) == "text"
     assert documents.determine_input_type("", True) == "document"
     assert documents.determine_input_type("hello", True) == "text+document"
+    assert documents.determine_input_type("2+2", True, use_document=False) == "text"
 
 
 def test_should_use_ocr() -> None:
