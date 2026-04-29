@@ -127,7 +127,7 @@ Fonctionnement sans Tesseract :
 Exemples :
 
 - `phi4-mini [candidate] [updated] [already_present]`
-- `granite3.3:8b [trusted] [up_to_date] [already_present]`
+- `qwen3:8b [trusted] [up_to_date] [already_present]`
 
 ---
 
@@ -163,6 +163,10 @@ ollama ps
 
 # Test rapide FAST
 ollama run phi4-mini "Dis bonjour en une phrase"
+
+# Tests rapides BALANCED / DEEP
+ollama run qwen3:8b "/no_think Dis bonjour en une phrase"
+ollama run qwen3:8b "/think Analyse brièvement ce diagnostic"
 
 # API Ollama
 Invoke-RestMethod -Uri "http://localhost:11434/api/tags"
