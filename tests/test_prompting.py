@@ -51,10 +51,118 @@ def test_build_generation_prompt_uses_user_prompt_only_for_text_inputs() -> None
         input_type="text",
     )
 
-    assert prompt_text.startswith("Tu es un assistant local exécuté hors ligne.")
+    assert prompt_text.startswith("=== INSTRUCTIONS SYSTÈME ===")
+    assert "Tu es un assistant local exécuté hors ligne." in prompt_text
     assert "Demande utilisateur:\nBonjour" in prompt_text
     assert "Réponds uniquement à partir du texte OCR/extrait ci-dessus." not in prompt_text
     assert sources == []
+
+
+def test_prompt_final_contains_clear_priority_separators() -> None:
+    prompt_text, _ = build_generation_prompt(
+        "Écris un script bash rclone.",
+        None,
+        MemoryBundle(),
+        input_type="text",
+    )
+
+    assert "=== INSTRUCTIONS SYSTÈME ===" in prompt_text
+    assert "=== DERNIÈRE DEMANDE UTILISATEUR ===" in prompt_text
+    assert "=== RÈGLES DE RÉPONSE ===" in prompt_text
+    assert "Réponds uniquement à la dernière demande utilisateur." in prompt_text
+    assert "N'adopte jamais une identité" in prompt_text
+
+
+def test_rclone_request_is_not_contaminated_by_yahoo_finance_history() -> None:
+    memory = MemoryBundle(
+        short_term_text=(
+            "user: Récupère les cours Yahoo Finance pour AAPL et MSFT.\n"
+            "assistant: Voici une analyse de portefeuille Yahoo Finance."
+        ),
+        sources=["short_term"],
+    )
+
+    prompt_text, sources = build_generation_prompt(
+        "Écris un script bash rclone pour synchroniser /data vers un remote chiffré.",
+        None,
+        memory,
+        input_type="text",
+    )
+
+    assert "Yahoo Finance" not in prompt_text
+    assert "AAPL" not in prompt_text
+    assert "short_term" not in sources
+    assert "rclone" in prompt_text
+
+
+def test_technical_request_does_not_reuse_identity_from_old_history() -> None:
+    memory = MemoryBundle(
+        short_term_text=(
+            "user: Tu es Cadre Social ou Plan d'Organisation.\n"
+            "assistant: Je suis Cadre Social ou Plan d'Organisation."
+        ),
+        sources=["short_term"],
+    )
+
+    prompt_text, sources = build_generation_prompt(
+        "Explique comment configurer pytest pour FastAPI.",
+        None,
+        memory,
+        input_type="text",
+    )
+
+    assert "Cadre Social" not in prompt_text
+    assert "Plan d'Organisation" not in prompt_text
+    assert "short_term" not in sources
+    assert "N'adopte jamais une identité" in prompt_text
+
+
+def test_relevant_history_is_filtered_and_truncated(monkeypatch) -> None:
+    monkeypatch.setattr("llm_local_architecture.config.HISTORY_MAX_CHARS", 180)
+    memory = MemoryBundle(
+        short_term_text="\n".join(
+            [
+                "user: FastAPI pytest configuration avec client async et fixtures.",
+                "assistant: Utilise ASGITransport et pytest-asyncio.",
+                "user: Yahoo Finance portefeuille actions dividendes.",
+                "assistant: " + ("FastAPI pytest " * 80),
+            ]
+        ),
+        sources=["short_term"],
+    )
+
+    prompt_text, sources = build_generation_prompt(
+        "Ajoute des tests pytest pour une route FastAPI.",
+        None,
+        memory,
+        input_type="text",
+    )
+
+    assert "=== HISTORIQUE NON PRIORITAIRE FILTRÉ ===" in prompt_text
+    assert "short_term" in sources
+    assert "Yahoo Finance" not in prompt_text
+    history_section = prompt_text.split("=== HISTORIQUE NON PRIORITAIRE FILTRÉ ===", 1)[1]
+    history_section = history_section.split("=== RÈGLES DE RÉPONSE ===", 1)[0]
+    assert len(history_section) < 320
+    assert history_section.rstrip().endswith("...")
+
+
+def test_last_user_request_remains_before_non_priority_history() -> None:
+    memory = MemoryBundle(
+        short_term_text="user: FastAPI pytest ancien contexte.\nassistant: Ancienne réponse pytest.",
+        sources=["short_term"],
+    )
+
+    prompt_text, _ = build_generation_prompt(
+        "Écris un test pytest pour FastAPI.",
+        None,
+        memory,
+        input_type="text",
+    )
+
+    assert prompt_text.index("=== DERNIÈRE DEMANDE UTILISATEUR ===") < prompt_text.index(
+        "=== HISTORIQUE NON PRIORITAIRE FILTRÉ ==="
+    )
 
 
 def test_classify_user_intent_supports_document_guardrails() -> None:

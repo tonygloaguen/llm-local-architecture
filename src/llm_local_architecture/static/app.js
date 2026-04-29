@@ -1,6 +1,7 @@
 const form = document.getElementById("chat-form");
 const promptField = document.getElementById("prompt");
 const documentField = document.getElementById("document");
+const useMemoryField = document.getElementById("use-memory");
 const submitButton = document.getElementById("submit");
 const responseNode = document.getElementById("response");
 const modelNode = document.getElementById("model");
@@ -22,6 +23,7 @@ form.addEventListener("submit", async (event) => {
 
   const formData = new FormData();
   formData.append("prompt", promptField.value);
+  formData.append("use_memory", useMemoryField.checked ? "true" : "false");
   if (sessionId) {
     formData.append("session_id", sessionId);
   }

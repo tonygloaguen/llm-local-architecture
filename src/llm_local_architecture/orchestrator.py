@@ -56,7 +56,7 @@ from .memory import (
 from .prompting import build_generation_prompt, classify_user_intent
 from .reasoning import ReasoningResult, run_adaptive_reasoning
 from .router import route
-from .schemas import ChatResponse
+from .schemas import ChatResponse, MemoryBundle
 from .storage import ensure_storage
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,7 @@ async def chat(
     prompt: str = Form(""),
     session_id: str | None = Form(None),
     reasoning_mode: str | None = Form(None),
+    use_memory: bool = Form(True),
     document: UploadFile | None = File(None),
 ) -> ChatResponse:
     """Point d'entrée unique de l'interface web locale."""
@@ -230,7 +231,7 @@ async def chat(
     use_document = processed_document is not None and intent.use_document
     active_document = processed_document if use_document else None
     input_type = determine_input_type(normalized_prompt, processed_document is not None, use_document=use_document)
-    memory = build_memory_bundle(active_session_id, document_id)
+    memory = build_memory_bundle(active_session_id, document_id) if use_memory else MemoryBundle()
     selected_model = route(effective_prompt)
     generation_prompt, memory_sources = build_generation_prompt(
         effective_prompt,
@@ -444,14 +445,15 @@ def main() -> None:
 
     Usage : python -m llm_local_architecture.orchestrator "<prompt>"
     """
-    if len(sys.argv) < 2:  # noqa: PLR2004
+    args = [arg for arg in sys.argv[1:] if arg != "--no-memory"]
+    if len(args) < 1:
         print(
-            'Usage: python -m llm_local_architecture.orchestrator "<prompt>"',
+            'Usage: python -m llm_local_architecture.orchestrator [--no-memory] "<prompt>"',
             file=sys.stderr,
         )
         sys.exit(1)
 
-    prompt = " ".join(sys.argv[1:])
+    prompt = " ".join(args)
     selected = route(prompt)
     print(f"[router] → {selected}", file=sys.stderr, flush=True)
 
