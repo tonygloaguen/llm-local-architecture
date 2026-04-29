@@ -52,12 +52,15 @@ $CURRENT_MANIFEST    = Join-Path $MANIFESTS_DIR "current_manifest.json"
 $APPROVED_REGISTRY   = Join-Path $REGISTRY_DIR "approved_models.json"
 
 $MODELS = @(
-    "qwen2.5-coder:7b-instruct",
-    "granite3.3:8b",
-    "deepseek-r1:7b",
     "phi4-mini",
-    "mistral:7b-instruct-v0.3-q4_K_M"
+    "qwen3:8b",
+    "qwen2.5-coder:7b-instruct"
 )
+# Modeles legacy toujours utilisables s'ils sont deja installes, mais non
+# telecharges ni approuves par defaut par ce script :
+# - mistral:7b-instruct-v0.3-q4_K_M
+# - deepseek-r1:7b
+# - granite3.3:8b
 
 $script:TesseractStatus = "ABSENT"
 $script:TesseractPath = $null
@@ -1365,6 +1368,7 @@ Write-Host "  MODELES CIBLES :"
 foreach ($model in $MODELS) {
     Write-Host "    -> $model"
 }
+Write-Host "    qwen3:8b sert de pivot balanced/deep (/no_think et /think)"
 Write-Host ""
 Write-Host "  ETAT ACTUEL :"
 foreach ($model in $currentManifest.models) {
@@ -1389,6 +1393,8 @@ Write-Host "    -LaunchApp          $LaunchApp"
 Write-Host ""
 Write-Host "  TEST RAPIDE :"
 Write-Host '    ollama run phi4-mini "Dis bonjour en une phrase"'
+Write-Host '    ollama run qwen3:8b "/no_think Dis bonjour en une phrase"'
+Write-Host '    ollama run qwen3:8b "/think Analyse brièvement ce diagnostic"'
 Write-Host ""
 
 if ($script:OcrOverallStatus -eq "ERROR") {
@@ -1402,4 +1408,3 @@ if ($LaunchApp) {
     Set-Location $REPO_DIR
     Start-FastApiApp
 }
-
