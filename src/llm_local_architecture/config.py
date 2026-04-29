@@ -34,9 +34,10 @@ REASONING_AUTO_SELECT: bool = _get_bool("REASONING_AUTO_SELECT", False)
 REASONING_MAX_LOOPS: int = _get_int("REASONING_MAX_LOOPS", 3)
 REASONING_ENABLE_CRITIC: bool = _get_bool("REASONING_ENABLE_CRITIC", True)
 REASONING_FAST_MODEL: str = os.getenv("REASONING_FAST_MODEL", "")
-REASONING_BALANCED_MODEL: str = os.getenv("REASONING_BALANCED_MODEL", "")
-REASONING_DEEP_MODEL: str = os.getenv("REASONING_DEEP_MODEL", "")
+REASONING_BALANCED_MODEL: str = os.getenv("REASONING_BALANCED_MODEL", "qwen3:8b")
+REASONING_DEEP_MODEL: str = os.getenv("REASONING_DEEP_MODEL", "qwen3:8b")
 REASONING_CRITIC_MODEL: str = os.getenv("REASONING_CRITIC_MODEL", "")
+REASONING_DEBUG_THINK_TAGS: bool = _get_bool("REASONING_DEBUG_THINK_TAGS", False)
 
 # Port de l'API orchestrateur
 ORCHESTRATOR_PORT: int = _get_int("ORCHESTRATOR_PORT", 8001)
@@ -83,29 +84,34 @@ DEFAULT_MODEL: str = "phi4-mini"
 
 # Catalogue des modèles disponibles avec leurs métadonnées
 MODEL_CATALOG: dict[str, dict[str, Any]] = {
-    "granite3.3:8b": {
-        "role": "audit",
-        "description": "Audit sécurité, DevSecOps, CI/CD, NIS2",
-        "vram_gb": 4.9,
+    "qwen3:8b": {
+        "role": "balanced_deep",
+        "description": "Pivot technique balanced/deep avec /no_think ou /think selon le mode",
+        "vram_gb": 5.2,
+    },
+    "phi4-mini": {
+        "role": "fast",
+        "description": "Réponses rapides, sanity checks, questions courtes",
+        "vram_gb": 2.4,
     },
     "qwen2.5-coder:7b-instruct": {
         "role": "code",
-        "description": "Code Python, FastAPI, LangGraph, debug code",
+        "description": "Code Python, FastAPI, pytest, Docker, GitHub Actions, refactor",
         "vram_gb": 4.1,
     },
+    "granite3.3:8b": {
+        "role": "legacy_audit",
+        "description": "Legacy optionnel : audit sécurité, DevSecOps, CI/CD, NIS2",
+        "vram_gb": 4.9,
+    },
     "deepseek-r1:7b": {
-        "role": "agent",
-        "description": "Raisonnement, orchestration, planification",
+        "role": "legacy_agent",
+        "description": "Legacy optionnel : raisonnement, orchestration, planification",
         "vram_gb": 4.5,
     },
-    "phi4-mini": {
-        "role": "debug",
-        "description": "Debug rapide, sanity check, questions courtes (permanent VRAM)",
-        "vram_gb": 2.4,
-    },
     "mistral:7b-instruct-v0.3-q4_K_M": {
-        "role": "redaction",
-        "description": "Rédaction française, documents, synthèse",
+        "role": "legacy_redaction",
+        "description": "Legacy optionnel : rédaction française, documents, synthèse",
         "vram_gb": 4.1,
     },
 }
@@ -113,11 +119,50 @@ MODEL_CATALOG: dict[str, dict[str, Any]] = {
 # Règles de routing — ordre = priorité (premier match gagne)
 ROUTING_RULES: list[dict[str, Any]] = [
     {
-        "model": "granite3.3:8b",
-        "role": "audit",
+        "model": "qwen2.5-coder:7b-instruct",
+        "role": "code",
         "keywords": [
-            "dockerfile",
+            "python",
+            "fastapi",
+            "sqlalchemy",
+            "langgraph",
+            "asyncio",
+            "async def",
+            "pydantic",
+            "pytest",
             "github actions",
+            "docker-compose",
+            "dockerfile",
+            "bash script",
+            "arm64",
+            "raspberry pi",
+            "playwright",
+            "langchain",
+            "openai sdk",
+            "refactor",
+            "patch",
+            "bugfix",
+            "corrige ce code",
+            "génère",
+            "génère le code",
+            "implémente",
+            ".py",
+            "def ",
+            "fonction python",
+            "class ",
+            "import ",
+            "```python",
+            "code python",
+            "bout de code",
+            "function",
+            "programme python",
+            "script python",
+        ],
+    },
+    {
+        "model": "qwen3:8b",
+        "role": "balanced_deep",
+        "keywords": [
             "ci/cd",
             "cve",
             "vulnerability",
@@ -146,44 +191,8 @@ ROUTING_RULES: list[dict[str, Any]] = [
         ],
     },
     {
-        "model": "qwen2.5-coder:7b-instruct",
-        "role": "code",
-        "keywords": [
-            "python",
-            "fastapi",
-            "sqlalchemy",
-            "langgraph",
-            "asyncio",
-            "async def",
-            "pydantic",
-            "pytest",
-            "docker-compose",
-            "bash script",
-            "arm64",
-            "raspberry pi",
-            "playwright",
-            "langchain",
-            "openai sdk",
-            "refactor",
-            "génère",
-            "génère le code",
-            "implémente",
-            ".py",
-            "def ",
-            "fonction python",
-            "class ",
-            "import ",
-            "```python",
-            "code python",
-            "bout de code",
-            "function",
-            "programme python",
-            "script python",
-        ],
-    },
-    {
-        "model": "deepseek-r1:7b",
-        "role": "agent",
+        "model": "qwen3:8b",
+        "role": "balanced_deep",
         "keywords": [
             "orchestr",
             "planifie",
@@ -207,8 +216,8 @@ ROUTING_RULES: list[dict[str, Any]] = [
         ],
     },
     {
-        "model": "mistral:7b-instruct-v0.3-q4_K_M",
-        "role": "redaction",
+        "model": "qwen3:8b",
+        "role": "balanced_deep",
         "keywords": [
             "rédige",
             "reformule",

@@ -99,6 +99,26 @@ OLLAMA_GENERATE_KEEP_ALIVE=0
 
 Avant chaque génération, l’orchestrateur lit `/api/ps`, arrête les modèles résidents qui ne sont pas le modèle sélectionné, puis appelle `/api/generate` avec `keep_alive=0`. Les modes `balanced` et `deep` gardent cette règle, mais font plusieurs appels séquentiels.
 
+Architecture modèle recommandée pour Windows 11 / RTX 5060 8 Go :
+
+| Profil | Modèle | Directive | Usage |
+| --- | --- | --- | --- |
+| FAST | `phi4-mini` | aucune | demandes courtes, sanity checks |
+| BALANCED | `qwen3:8b` | `/no_think` | technique standard, synthèse, explication |
+| DEEP | `qwen3:8b` | `/think` | logs longs, traceback, audit sécurité, diagnostic multi-étapes |
+| CODE | `qwen2.5-coder:7b-instruct` | aucune par défaut | Python, FastAPI, pytest, GitHub Actions, Docker, refactor, patch, bugfix |
+
+`qwen3:8b` est le pivot `balanced`/`deep` pour limiter les rechargements VRAM et simplifier le routage. Q4_K_M est recommandé en première intention sur 8 Go VRAM ; Q5_K_M reste expérimental et doit être validé par benchmark local. `mistral`, `deepseek-r1` et `granite` sont conservés comme modèles legacy/optionnels, sans priorité par défaut.
+
+Commandes Ollama minimales :
+
+```bash
+ollama pull qwen3:8b
+ollama pull phi4-mini
+ollama pull qwen2.5-coder:7b-instruct
+ollama ps
+```
+
 Les notes ci-dessous sur un modèle permanent sont historiques/prospectives et ne sont pas le réglage recommandé pour la cible 8 Go VRAM.
 
 **Permanent** (toujours en VRAM) :

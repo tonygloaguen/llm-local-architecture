@@ -85,7 +85,7 @@ async def test_route_endpoint_returns_model(client) -> None:
     resp = await client.post("/route", json={"prompt": "Audite ce Dockerfile"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["model"] == "granite3.3:8b"
+    assert body["model"] == "qwen2.5-coder:7b-instruct"
     assert body["routed_by"] == "auto"
 
 

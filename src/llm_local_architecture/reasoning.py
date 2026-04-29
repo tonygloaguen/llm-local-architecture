@@ -10,11 +10,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
 import re
+import time
 
 from .config import (
     REASONING_AUTO_SELECT,
     REASONING_BALANCED_MODEL,
     REASONING_CRITIC_MODEL,
+    REASONING_DEBUG_THINK_TAGS,
     REASONING_DEEP_MODEL,
     REASONING_ENABLE_CRITIC,
     REASONING_FAST_MODEL,
@@ -66,6 +68,16 @@ _TECHNICAL_KEYWORDS = (
     "test",
     "workflow",
 )
+_CODE_KEYWORDS = (
+    "bugfix",
+    "dockerfile",
+    "fastapi",
+    "github actions",
+    "patch",
+    "pytest",
+    "python",
+    "refactor",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +89,8 @@ class ReasoningResult:
     fallback_used: bool
     mode: str
     loops: int
+    ollama_calls: int = 0
+    total_seconds: float = 0.0
 
 
 def normalize_reasoning_mode(mode: str | None) -> str:
@@ -90,6 +104,10 @@ def normalize_reasoning_mode(mode: str | None) -> str:
 def select_reasoning_mode(prompt: str) -> str:
     """Sélecteur déterministe simple pour REASONING_AUTO_SELECT."""
     normalized = _normalize(prompt)
+    if _looks_like_logs_traceback_or_security(prompt):
+        return "deep"
+    if any(keyword in normalized for keyword in _CODE_KEYWORDS) or _looks_like_code_patch(prompt):
+        return "balanced"
     if any(keyword in normalized for keyword in _DEEP_KEYWORDS) or _looks_like_code_or_logs(prompt):
         return "deep"
     if any(keyword in normalized for keyword in _TECHNICAL_KEYWORDS) or len(prompt) > 240:
@@ -125,13 +143,33 @@ async def run_adaptive_reasoning(
     requested_mode: str | None = None,
 ) -> ReasoningResult:
     """Exécute le pipeline adaptatif via la fonction de génération fournie."""
+    started_at = time.perf_counter()
+    ollama_calls = 0
     mode = resolve_reasoning_mode(prompt, requested_mode)
     generation_model = resolve_reasoning_model(mode, selected_model)
+    generation_prompt = apply_reasoning_directive(prompt, mode, generation_model)
 
-    logger.info("Reasoning mode=%s model=%s loop=0 event=start", mode, generation_model)
-    initial_response, actual_model, fallback_used = await generate(prompt, generation_model)
+    logger.info(
+        "Reasoning mode=%s model=%s directive=%s loop=0 event=start",
+        mode,
+        generation_model,
+        reasoning_directive_name(mode, generation_model),
+    )
+    initial_response, actual_model, fallback_used = await generate(generation_prompt, generation_model)
+    ollama_calls += 1
+    initial_response = filter_thinking_tags(initial_response)
     if mode == "fast" or not REASONING_ENABLE_CRITIC:
-        return ReasoningResult(initial_response, actual_model, fallback_used, mode, 0)
+        total_seconds = time.perf_counter() - started_at
+        logger.info(
+            "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s total_seconds=%.3f event=done",
+            mode,
+            actual_model,
+            reasoning_directive_name(mode, actual_model),
+            ollama_calls,
+            fallback_used,
+            total_seconds,
+        )
+        return ReasoningResult(initial_response, actual_model, fallback_used, mode, 0, ollama_calls, total_seconds)
 
     max_loops = _loop_limit(mode)
     answer = initial_response
@@ -142,17 +180,26 @@ async def run_adaptive_reasoning(
     for loop in range(1, max_loops + 1):
         completed_loops = loop
         critic_model = _critic_model(current_model)
-        logger.info("Reasoning mode=%s model=%s loop=%s event=critic", mode, critic_model, loop)
+        logger.info(
+            "Reasoning mode=%s model=%s directive=%s loop=%s event=critic",
+            mode,
+            critic_model,
+            reasoning_directive_name(mode, critic_model),
+            loop,
+        )
         try:
             critique, actual_critic_model, critic_fallback = await generate(
-                _build_critique_prompt(prompt, answer, mode),
+                apply_reasoning_directive(_build_critique_prompt(prompt, answer, mode), mode, critic_model),
                 critic_model,
             )
+            ollama_calls += 1
+            critique = filter_thinking_tags(critique)
             any_fallback = any_fallback or critic_fallback
             logger.info(
-                "Reasoning mode=%s model=%s loop=%s fallback=%s event=critic_done",
+                "Reasoning mode=%s model=%s directive=%s loop=%s fallback=%s event=critic_done",
                 mode,
                 actual_critic_model,
+                reasoning_directive_name(mode, actual_critic_model),
                 loop,
                 critic_fallback,
             )
@@ -160,11 +207,19 @@ async def run_adaptive_reasoning(
                 break
 
             revision_model = actual_critic_model if REASONING_CRITIC_MODEL.strip() else current_model
-            logger.info("Reasoning mode=%s model=%s loop=%s event=revision", mode, revision_model, loop)
+            logger.info(
+                "Reasoning mode=%s model=%s directive=%s loop=%s event=revision",
+                mode,
+                revision_model,
+                reasoning_directive_name(mode, revision_model),
+                loop,
+            )
             answer, current_model, revision_fallback = await generate(
-                _build_revision_prompt(prompt, answer, critique, mode),
+                apply_reasoning_directive(_build_revision_prompt(prompt, answer, critique, mode), mode, revision_model),
                 revision_model,
             )
+            ollama_calls += 1
+            answer = filter_thinking_tags(answer)
             any_fallback = any_fallback or revision_fallback
         except Exception as exc:
             logger.warning(
@@ -176,7 +231,47 @@ async def run_adaptive_reasoning(
             )
             break
 
-    return ReasoningResult(answer, current_model, any_fallback, mode, completed_loops)
+    total_seconds = time.perf_counter() - started_at
+    logger.info(
+        "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s total_seconds=%.3f event=done",
+        mode,
+        current_model,
+        reasoning_directive_name(mode, current_model),
+        ollama_calls,
+        any_fallback,
+        total_seconds,
+    )
+    return ReasoningResult(answer, current_model, any_fallback, mode, completed_loops, ollama_calls, total_seconds)
+
+
+def apply_reasoning_directive(prompt: str, mode: str, model: str) -> str:
+    """Ajoute /think ou /no_think uniquement aux modèles Qwen3 compatibles."""
+    directive = reasoning_directive_name(mode, model)
+    if directive == "none":
+        return prompt
+    stripped = prompt.lstrip()
+    if stripped.startswith("/think") or stripped.startswith("/no_think"):
+        return prompt
+    return f"/{directive}\n{prompt}"
+
+
+def reasoning_directive_name(mode: str, model: str) -> str:
+    """Retourne la directive Qwen3 effective pour les logs."""
+    if not _is_qwen3_model(model):
+        return "none"
+    if mode == "deep":
+        return "think"
+    if mode == "balanced":
+        return "no_think"
+    return "none"
+
+
+def filter_thinking_tags(text: str) -> str:
+    """Supprime les blocs <think>...</think> sauf debug explicite."""
+    if REASONING_DEBUG_THINK_TAGS:
+        return text
+    without_blocks = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    return without_blocks.strip()
 
 
 def _loop_limit(mode: str) -> int:
@@ -245,6 +340,43 @@ def _looks_like_code_or_logs(prompt: str) -> bool:
         r"\bfailed\b",
     )
     return any(re.search(pattern, prompt, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _looks_like_logs_traceback_or_security(prompt: str) -> bool:
+    normalized = _normalize(prompt)
+    security_keywords = (
+        "audit",
+        "bandit",
+        "checkov",
+        "cve",
+        "gitleaks",
+        "securite",
+        "security",
+        "traceback",
+        "trivy",
+    )
+    log_patterns = (
+        r"\btraceback\b",
+        r"\b(stack trace|exception|runtimeerror|keyerror|typeerror)\b",
+        r"\b(error|failed|fatal|panic)\b.*\n.*\b(error|failed|fatal|panic)\b",
+    )
+    return any(keyword in normalized for keyword in security_keywords) or any(
+        re.search(pattern, prompt, flags=re.IGNORECASE | re.DOTALL) for pattern in log_patterns
+    )
+
+
+def _looks_like_code_patch(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(patch|bugfix|refactor|github actions|dockerfile|fastapi|pytest|python)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_qwen3_model(model: str) -> bool:
+    return model.strip().lower().startswith("qwen3")
 
 
 def _clip_internal(text: str, limit: int) -> str:
