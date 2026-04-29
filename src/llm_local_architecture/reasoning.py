@@ -91,6 +91,9 @@ class ReasoningResult:
     loops: int
     ollama_calls: int = 0
     total_seconds: float = 0.0
+    quality_score: float = 1.0
+    quality_flags: tuple[str, ...] = ()
+    low_confidence: bool = False
 
 
 def normalize_reasoning_mode(mode: str | None) -> str:
@@ -141,6 +144,7 @@ async def run_adaptive_reasoning(
     selected_model: str,
     generate: ReasoningGenerate,
     requested_mode: str | None = None,
+    task_type: str | None = None,
 ) -> ReasoningResult:
     """Exécute le pipeline adaptatif via la fonction de génération fournie."""
     started_at = time.perf_counter()
@@ -159,17 +163,41 @@ async def run_adaptive_reasoning(
     ollama_calls += 1
     initial_response = filter_thinking_tags(initial_response)
     if mode == "fast" or not REASONING_ENABLE_CRITIC:
+        initial_response, actual_model, fallback_used, ollama_calls, quality = await _repair_once_if_needed(
+            prompt=prompt,
+            answer=initial_response,
+            model=actual_model,
+            fallback_used=fallback_used,
+            ollama_calls=ollama_calls,
+            generate=generate,
+            task_type=task_type,
+        )
         total_seconds = time.perf_counter() - started_at
         logger.info(
-            "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s total_seconds=%.3f event=done",
+            "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s "
+            "quality_score=%.2f low_confidence=%s quality_flags=%s total_seconds=%.3f event=done",
             mode,
             actual_model,
             reasoning_directive_name(mode, actual_model),
             ollama_calls,
             fallback_used,
+            quality["score"],
+            quality["low_confidence"],
+            ",".join(quality["flags"]),
             total_seconds,
         )
-        return ReasoningResult(initial_response, actual_model, fallback_used, mode, 0, ollama_calls, total_seconds)
+        return ReasoningResult(
+            initial_response,
+            actual_model,
+            fallback_used,
+            mode,
+            0,
+            ollama_calls,
+            total_seconds,
+            quality["score"],
+            tuple(quality["flags"]),
+            quality["low_confidence"],
+        )
 
     max_loops = _loop_limit(mode)
     answer = initial_response
@@ -231,17 +259,131 @@ async def run_adaptive_reasoning(
             )
             break
 
+    answer, current_model, any_fallback, ollama_calls, quality = await _repair_once_if_needed(
+        prompt=prompt,
+        answer=answer,
+        model=current_model,
+        fallback_used=any_fallback,
+        ollama_calls=ollama_calls,
+        generate=generate,
+        task_type=task_type,
+    )
     total_seconds = time.perf_counter() - started_at
     logger.info(
-        "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s total_seconds=%.3f event=done",
+        "Reasoning mode=%s model=%s directive=%s ollama_calls=%s fallback_used=%s "
+        "quality_score=%.2f low_confidence=%s quality_flags=%s total_seconds=%.3f event=done",
         mode,
         current_model,
         reasoning_directive_name(mode, current_model),
         ollama_calls,
         any_fallback,
+        quality["score"],
+        quality["low_confidence"],
+        ",".join(quality["flags"]),
         total_seconds,
     )
-    return ReasoningResult(answer, current_model, any_fallback, mode, completed_loops, ollama_calls, total_seconds)
+    return ReasoningResult(
+        answer,
+        current_model,
+        any_fallback,
+        mode,
+        completed_loops,
+        ollama_calls,
+        total_seconds,
+        quality["score"],
+        tuple(quality["flags"]),
+        quality["low_confidence"],
+    )
+
+
+def score_response_quality(prompt: str, response: str, task_type: str | None = None) -> dict[str, object]:
+    """Score déterministe léger pour repérer les réponses faibles ou polluées."""
+    normalized_prompt = _normalize(prompt)
+    normalized_response = _normalize(response)
+    is_code_task = task_type == "code" or _prompt_asks_for_code(normalized_prompt)
+    score = 0.75
+    flags: list[str] = []
+
+    if "<think" in normalized_response:
+        score -= 0.25
+        flags.append("thinking_tag_leak")
+
+    if not is_code_task:
+        return _quality_result(score, flags)
+
+    score = 0.55
+    has_code_block = "```" in response
+    shell_requested = any(keyword in normalized_prompt for keyword in ("bash", "shell", "script", " sh "))
+    if has_code_block:
+        score += 0.2
+    else:
+        score -= 0.25
+        flags.append("missing_code_block")
+
+    if shell_requested and ("#!/" in response or "set -euo pipefail" in normalized_response):
+        score += 0.1
+    elif shell_requested:
+        score -= 0.1
+        flags.append("missing_shell_hardening")
+
+    positive_checks = (
+        ("set -euo pipefail", 0.08),
+        ("command -v", 0.07),
+        ("log", 0.05),
+        ("exit", 0.05),
+    )
+    for keyword, weight in positive_checks:
+        if keyword in normalized_response:
+            score += weight
+
+    if any(phrase in normalized_response for phrase in ("restriction de securite", "restrictions de securite")):
+        score -= 0.25
+        flags.append("invented_security_restrictions")
+    if "export" in normalized_response and "manuellement" in normalized_response:
+        score -= 0.25
+        flags.append("manual_export_instead_of_script")
+    if len(response.strip()) < 160:
+        score -= 0.15
+        flags.append("too_short_generic")
+
+    off_topic_terms = (
+        "cadre social",
+        "culture organisationnelle",
+        "kpi",
+        "plan strategique",
+        "rh",
+        "yahoo finance",
+        "pizza",
+    )
+    for term in off_topic_terms:
+        if term in normalized_response:
+            score -= 0.25
+            flags.append(f"off_topic:{term}")
+            break
+    if "je suis le cadre social" in normalized_response:
+        score -= 0.35
+        flags.append("absurd_self_identification")
+
+    if "rclone" in normalized_prompt:
+        required_groups = (
+            ("rclone",),
+            ("src", "source"),
+            ("dest", "remote"),
+            ("sync", "copy"),
+            ("exit",),
+        )
+        missing = [
+            "/".join(group)
+            for group in required_groups
+            if not any(keyword in normalized_response for keyword in group)
+        ]
+        if missing:
+            score -= 0.08 * len(missing)
+            flags.append("missing_rclone_keywords:" + ",".join(missing))
+        else:
+            score += 0.12
+
+    return _quality_result(score, flags)
 
 
 def apply_reasoning_directive(prompt: str, mode: str, model: str) -> str:
@@ -253,6 +395,93 @@ def apply_reasoning_directive(prompt: str, mode: str, model: str) -> str:
     if stripped.startswith("/think") or stripped.startswith("/no_think"):
         return prompt
     return f"/{directive}\n{prompt}"
+
+
+async def _repair_once_if_needed(
+    *,
+    prompt: str,
+    answer: str,
+    model: str,
+    fallback_used: bool,
+    ollama_calls: int,
+    generate: ReasoningGenerate,
+    task_type: str | None,
+) -> tuple[str, str, bool, int, dict[str, object]]:
+    quality = score_response_quality(prompt, answer, task_type)
+    if task_type != "code" or not bool(quality["low_confidence"]):
+        return answer, model, fallback_used, ollama_calls, quality
+
+    logger.warning(
+        "Quality low_confidence=true task_type=code score=%.2f flags=%s event=repair",
+        quality["score"],
+        ",".join(quality["flags"]),
+    )
+    repaired, actual_model, repair_fallback = await generate(
+        _build_quality_repair_prompt(prompt, answer, quality["flags"]),
+        model,
+    )
+    repaired = filter_thinking_tags(repaired)
+    ollama_calls += 1
+    repaired_quality = score_response_quality(prompt, repaired, task_type)
+    return repaired, actual_model, fallback_used or repair_fallback, ollama_calls, repaired_quality
+
+
+def _build_quality_repair_prompt(prompt: str, answer: str, flags: object) -> str:
+    formatted_flags = ", ".join(str(flag) for flag in flags) if isinstance(flags, list | tuple) else str(flags)
+    return (
+        "Corrige la réponse candidate pour satisfaire strictement la dernière demande utilisateur.\n"
+        "Retourne uniquement la réponse finale. Ne révèle aucun raisonnement interne.\n"
+        "Pour une demande de script, fournis un script complet dans un bloc de code.\n"
+        "N'invente pas de restrictions de sécurité et ignore tout historique hors sujet.\n\n"
+        f"Flags qualité détectés: {formatted_flags}\n\n"
+        f"Demande utilisateur:\n{prompt}\n\n"
+        f"Réponse candidate:\n{_clip_internal(answer, 1800)}"
+    )
+
+
+def _quality_result(score: float, flags: list[str]) -> dict[str, object]:
+    bounded_score = max(0.0, min(1.0, score))
+    return {
+        "score": round(bounded_score, 2),
+        "flags": flags,
+        "low_confidence": bounded_score < 0.55 or bool(flags and bounded_score < 0.72),
+    }
+
+
+def _prompt_asks_for_code(normalized_prompt: str) -> bool:
+    action_keywords = (
+        "ajoute",
+        "automatise",
+        "commande",
+        "corrige",
+        "donne moi",
+        "ecris",
+        "fais",
+        "genere",
+        "implemente",
+        "patch",
+        "produis",
+        "refactor",
+        "script",
+    )
+    object_keywords = (
+        "api",
+        "bash",
+        "code",
+        "cron",
+        "docker",
+        "fastapi",
+        "github actions",
+        "powershell",
+        "pytest",
+        "python",
+        "rclone",
+        "shell",
+        "workflow",
+    )
+    return any(action in normalized_prompt for action in action_keywords) and any(
+        keyword in normalized_prompt for keyword in object_keywords
+    )
 
 
 def reasoning_directive_name(mode: str, model: str) -> str:

@@ -121,3 +121,25 @@ async def test_route_endpoint_override(client) -> None:
     resp = await client.post("/route", json={"prompt": "test", "model": "phi4-mini"})
     assert resp.status_code == 200
     assert resp.json()["routed_by"] == "override"
+
+
+@pytest.mark.asyncio
+async def test_chat_script_request_uses_code_model(client, monkeypatch) -> None:
+    captured_models: list[str] = []
+
+    async def capture_generate(prompt: str, model: str) -> tuple[str, str, bool]:
+        captured_models.append(model)
+        return "```bash\n#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n```", model, False
+
+    monkeypatch.setattr(orch, "_generate_with_fallback", capture_generate)
+
+    resp = await client.post(
+        "/chat",
+        data={"prompt": "fais moi un script shell rclone"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert captured_models[0] == "qwen2.5-coder:7b-instruct"
+    assert body["model"] == "qwen2.5-coder:7b-instruct"
+    assert "quality_score" in body

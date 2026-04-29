@@ -130,6 +130,94 @@ def test_think_tags_are_removed_from_final_response(monkeypatch) -> None:
     assert filtered == "Réponse publique"
 
 
+def test_quality_flags_script_request_without_code() -> None:
+    quality = reasoning.score_response_quality(
+        "fais moi un script shell rclone",
+        "Vous devriez exporter manuellement vos fichiers.",
+        task_type="code",
+    )
+
+    assert quality["low_confidence"] is True
+    assert "missing_code_block" in quality["flags"]
+    assert "manual_export_instead_of_script" in quality["flags"]
+
+
+def test_quality_flags_off_topic_history_leak() -> None:
+    quality = reasoning.score_response_quality(
+        "écris un script bash backup gdrive",
+        "Je suis le cadre social. Les KPI RH imposent une stratégie.",
+        task_type="code",
+    )
+
+    assert quality["low_confidence"] is True
+    assert "absurd_self_identification" in quality["flags"]
+
+
+def test_quality_accepts_robust_rclone_bash_script() -> None:
+    response = """```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SRC_DIR="/home/user/data"
+DEST_REMOTE="gdrive:backup"
+LOG_FILE="/var/log/rclone-backup.log"
+
+command -v rclone >/dev/null 2>&1 || { echo "rclone missing"; exit 127; }
+test -d "$SRC_DIR" || { echo "source missing"; exit 2; }
+rclone lsd "$DEST_REMOTE" >/dev/null
+rclone sync "$SRC_DIR" "$DEST_REMOTE" --log-file "$LOG_FILE" --log-level INFO
+exit 0
+```"""
+
+    quality = reasoning.score_response_quality(
+        "fais moi un script shell rclone backup gdrive",
+        response,
+        task_type="code",
+    )
+
+    assert quality["low_confidence"] is False
+    assert quality["score"] >= 0.8
+
+
+@pytest.mark.asyncio
+async def test_low_quality_code_response_is_repaired_once(monkeypatch) -> None:
+    monkeypatch.setattr(reasoning, "REASONING_ENABLE_CRITIC", False)
+    responses = iter(
+        [
+            ("Exportez manuellement vos fichiers.", "qwen2.5-coder:7b-instruct", False),
+            (
+                "```bash\n#!/usr/bin/env bash\nset -euo pipefail\n"
+                "SRC_DIR=/tmp/src\nDEST_REMOTE=gdrive:backup\nLOG_FILE=/tmp/backup.log\n"
+                "command -v rclone >/dev/null || exit 127\n"
+                "test -d \"$SRC_DIR\" || exit 2\n"
+                "rclone lsd \"$DEST_REMOTE\" >/dev/null\n"
+                "rclone sync \"$SRC_DIR\" \"$DEST_REMOTE\" --log-file \"$LOG_FILE\" --log-level INFO\n"
+                "exit 0\n```",
+                "qwen2.5-coder:7b-instruct",
+                False,
+            ),
+        ]
+    )
+    calls: list[str] = []
+
+    async def generate(prompt: str, model: str) -> tuple[str, str, bool]:
+        calls.append(prompt)
+        return next(responses)
+
+    result = await reasoning.run_adaptive_reasoning(
+        prompt="fais moi un script shell rclone backup gdrive",
+        selected_model="qwen2.5-coder:7b-instruct",
+        generate=generate,
+        task_type="code",
+    )
+
+    assert result.ollama_calls == 2
+    assert len(calls) == 2
+    assert "Corrige la réponse candidate" in calls[1]
+    assert result.low_confidence is False
+    assert "<think>" not in result.response
+
+
 @pytest.mark.parametrize(
     "prompt",
     [

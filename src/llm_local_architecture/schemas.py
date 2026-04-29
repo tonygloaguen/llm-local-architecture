@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 @dataclass(slots=True)
@@ -80,3 +80,6 @@ class ChatResponse(BaseModel):
     document_id: str | None = None
     memory_sources: list[str]
     extraction_method: str | None = None
+    quality_score: float | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    low_confidence: bool = False

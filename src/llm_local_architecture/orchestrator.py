@@ -28,7 +28,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import (
     DEFAULT_MODEL,
@@ -55,7 +55,7 @@ from .memory import (
 )
 from .prompting import build_generation_prompt, classify_user_intent
 from .reasoning import ReasoningResult, run_adaptive_reasoning
-from .router import route
+from .router import CODE_MODEL, is_code_task_request, route
 from .schemas import ChatResponse, MemoryBundle
 from .storage import ensure_storage
 
@@ -110,6 +110,9 @@ class PromptResponse(BaseModel):
     model: str
     routed_by: str  # "auto" | "override" | "fallback:<model>"
     response: str
+    quality_score: float | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    low_confidence: bool = False
 
 
 @app.get("/", include_in_schema=False)
@@ -168,6 +171,7 @@ async def generate(req: PromptRequest) -> PromptResponse:
         req.prompt,
         selected_model,
         req.reasoning_mode,
+        task_type=_task_type_for_prompt(req.prompt, selected_model),
     )
     if result.fallback_used:
         routed_by = f"fallback:{DEFAULT_MODEL} (original:{selected_model} indisponible)"
@@ -175,6 +179,9 @@ async def generate(req: PromptRequest) -> PromptResponse:
         model=result.model,
         routed_by=routed_by,
         response=result.response,
+        quality_score=result.quality_score,
+        quality_flags=list(result.quality_flags),
+        low_confidence=result.low_confidence,
     )
 
 
@@ -233,6 +240,7 @@ async def chat(
     input_type = determine_input_type(normalized_prompt, processed_document is not None, use_document=use_document)
     memory = build_memory_bundle(active_session_id, document_id) if use_memory else MemoryBundle()
     selected_model = route(effective_prompt)
+    task_type = _task_type_for_prompt(effective_prompt, selected_model)
     generation_prompt, memory_sources = build_generation_prompt(
         effective_prompt,
         active_document,
@@ -246,6 +254,7 @@ async def chat(
         generation_prompt,
         selected_model,
         reasoning_mode,
+        task_type=task_type,
     )
     routed_by = "auto"
     if result.fallback_used:
@@ -265,6 +274,9 @@ async def chat(
         document_id=document_id,
         memory_sources=memory_sources,
         extraction_method=processed_document.extraction_method if processed_document else None,
+        quality_score=result.quality_score,
+        quality_flags=list(result.quality_flags),
+        low_confidence=result.low_confidence,
     )
 
 
@@ -427,6 +439,7 @@ async def _run_generation_pipeline(
     prompt: str,
     selected_model: str,
     reasoning_mode: str | None = None,
+    task_type: str | None = None,
 ) -> ReasoningResult:
     """Exécute la génération historique ou le pipeline de raisonnement opt-in."""
     return await run_adaptive_reasoning(
@@ -434,7 +447,14 @@ async def _run_generation_pipeline(
         selected_model=selected_model,
         requested_mode=reasoning_mode,
         generate=_generate_with_fallback,
+        task_type=task_type,
     )
+
+
+def _task_type_for_prompt(prompt: str, selected_model: str) -> str | None:
+    if selected_model == CODE_MODEL or is_code_task_request(prompt):
+        return "code"
+    return None
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
