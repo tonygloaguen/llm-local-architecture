@@ -75,7 +75,7 @@ jobs:
       - name: Scan docker-compose.yml
         run: |
           checkov -f docker-compose.yml \
-            --framework docker_compose \
+            --framework yaml \
             --skip-path .venv \
             --skip-path venv \
             --skip-path __pycache__ \
