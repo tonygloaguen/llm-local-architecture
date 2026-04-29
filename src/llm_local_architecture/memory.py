@@ -6,7 +6,13 @@ import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from .config import APP_DB_PATH, DOCUMENT_EXCERPT_CHARS, SHORT_TERM_MESSAGE_LIMIT
+from .config import (
+    APP_DB_PATH,
+    DOCUMENT_EXCERPT_CHARS,
+    SHORT_TERM_MAX_CHARS,
+    SHORT_TERM_MESSAGE_LIMIT,
+    SHORT_TERM_MESSAGE_MAX_CHARS,
+)
 from .schemas import MemoryBundle, ProcessedDocument
 
 
@@ -18,6 +24,13 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(APP_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _clip(text: str, limit: int) -> str:
+    normalized = text.strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit].rstrip() + "..."
 
 
 def initialize_database() -> None:
@@ -149,10 +162,17 @@ def build_memory_bundle(session_id: str, document_id: str | None = None) -> Memo
         ).fetchall()
         if messages:
             ordered = list(reversed(messages))
-            bundle.short_term_text = "\n".join(
-                f"{row['role']}: {row['content']}" for row in ordered
-            )
-            bundle.sources.append("short_term")
+            lines: list[str] = []
+            total_chars = 0
+            for row in ordered:
+                line = f"{row['role']}: {_clip(row['content'], SHORT_TERM_MESSAGE_MAX_CHARS)}"
+                if lines and total_chars + len(line) + 1 > SHORT_TERM_MAX_CHARS:
+                    continue
+                lines.append(line)
+                total_chars += len(line) + 1
+            if lines:
+                bundle.short_term_text = "\n".join(lines)
+                bundle.sources.append("short_term")
 
         if document_id is not None:
             doc_row = conn.execute(

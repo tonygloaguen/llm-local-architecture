@@ -55,6 +55,33 @@ async def test_chat_text_only_returns_200(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_use_memory_false_disables_memory_injection(client, monkeypatch) -> None:
+    calls: list[str] = []
+    captured_memory: list[MemoryBundle] = []
+
+    def fail_if_called(*args, **kwargs) -> MemoryBundle:
+        calls.append("called")
+        return MemoryBundle(short_term_text="user: Yahoo Finance", sources=["short_term"])
+
+    def capture_prompt_builder(prompt, document, memory, input_type="text", intent=None):
+        captured_memory.append(memory)
+        return prompt, list(memory.sources)
+
+    monkeypatch.setattr(orch, "build_memory_bundle", fail_if_called)
+    monkeypatch.setattr(orch, "build_generation_prompt", capture_prompt_builder)
+
+    resp = await client.post(
+        "/chat",
+        data={"prompt": "Écris un script rclone", "use_memory": "false"},
+    )
+
+    assert resp.status_code == 200
+    assert calls == []
+    assert captured_memory[0].short_term_text == ""
+    assert resp.json()["memory_sources"] == []
+
+
+@pytest.mark.asyncio
 async def test_chat_document_required_without_document_returns_guardrail(client) -> None:
     resp = await client.post("/chat", data={"prompt": "Résume ce courrier"})
     assert resp.status_code == 200

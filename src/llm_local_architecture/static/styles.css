@@ -37,6 +37,12 @@ button {
   font: inherit;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 textarea {
   width: 100%;
   min-height: 180px;

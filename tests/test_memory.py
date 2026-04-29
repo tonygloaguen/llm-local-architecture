@@ -32,3 +32,22 @@ def test_memory_roundtrip(tmp_path: Path, monkeypatch) -> None:
     assert "Contenu de document" in bundle.documentary_text
     assert "short_term" in bundle.sources
     assert "documentary" in bundle.sources
+
+
+def test_short_term_memory_is_bounded(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "app.db"
+    monkeypatch.setattr(memory, "APP_DB_PATH", db_path)
+    monkeypatch.setattr(memory, "SHORT_TERM_MESSAGE_LIMIT", 20)
+    monkeypatch.setattr(memory, "SHORT_TERM_MESSAGE_MAX_CHARS", 40)
+    monkeypatch.setattr(memory, "SHORT_TERM_MAX_CHARS", 120)
+
+    memory.initialize_database()
+    session_id = memory.ensure_session()
+    for index in range(10):
+        memory.save_message(session_id, "user", f"message {index} " + ("x" * 80))
+
+    bundle = memory.build_memory_bundle(session_id)
+
+    assert len(bundle.short_term_text) <= 130
+    assert "..." in bundle.short_term_text
+    assert bundle.short_term_text.count("user:") < 10
