@@ -73,6 +73,43 @@ def test_prompt_final_contains_clear_priority_separators() -> None:
     assert "N'adopte jamais une identité" in prompt_text
 
 
+def test_code_prompt_uses_strict_code_agent_rules() -> None:
+    prompt_text, sources = build_generation_prompt(
+        "fais moi un script shell rclone backup gdrive",
+        None,
+        MemoryBundle(),
+        input_type="text",
+    )
+
+    assert "Tu es un ingénieur DevOps senior." in prompt_text
+    assert "Mode code strict." in prompt_text
+    assert "set -euo pipefail" in prompt_text
+    assert "rclone sync ou rclone copy" in prompt_text
+    assert sources == []
+
+
+def test_code_prompt_does_not_inject_polluted_hr_history() -> None:
+    memory = MemoryBundle(
+        short_term_text=(
+            "user: Nos KPI RH et le cadre social guident le plan stratégique.\n"
+            "assistant: Je suis le cadre social et la culture organisationnelle."
+        ),
+        sources=["short_term"],
+    )
+
+    prompt_text, sources = build_generation_prompt(
+        "fais moi un script shell pour faire un backup o2switch vers gdrive avec rclone",
+        None,
+        memory,
+        input_type="text",
+    )
+
+    assert "KPI" not in prompt_text
+    assert "cadre social" not in prompt_text.lower()
+    assert "plan stratégique" not in prompt_text
+    assert "short_term" not in sources
+
+
 def test_rclone_request_is_not_contaminated_by_yahoo_finance_history() -> None:
     memory = MemoryBundle(
         short_term_text=(

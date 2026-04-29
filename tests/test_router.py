@@ -22,6 +22,9 @@ from llm_local_architecture.router import route
         ("Génère le code pour ce module pytest", "qwen2.5-coder:7b-instruct"),
         ("Patch Python pour corriger ce bugfix", "qwen2.5-coder:7b-instruct"),
         ("Corrige ce workflow GitHub Actions", "qwen2.5-coder:7b-instruct"),
+        ("fais moi un script shell rclone", "qwen2.5-coder:7b-instruct"),
+        ("écris un script bash backup gdrive", "qwen2.5-coder:7b-instruct"),
+        ("donne moi une commande docker", "qwen2.5-coder:7b-instruct"),
         # ── Balanced / deep pivot Qwen3 ───────────────────────────────────────
         ("Revue de sécurité du pipeline CI/CD", "qwen3:8b"),
         ("Trivy scan results show CVE-2023-1234", "qwen3:8b"),
@@ -97,3 +100,7 @@ def test_router_code_python_still_routes_to_qwen() -> None:
     assert route("Implémente cette classe Python") == "qwen2.5-coder:7b-instruct"
     assert route("Génère le code pour ce module pytest") == "qwen2.5-coder:7b-instruct"
     assert route("def foo(): pass") == "qwen2.5-coder:7b-instruct"
+
+
+def test_router_conceptual_bash_question_is_not_forced_to_code() -> None:
+    assert route("explique ce qu’est bash") != "qwen2.5-coder:7b-instruct"
