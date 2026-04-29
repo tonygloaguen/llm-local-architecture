@@ -26,6 +26,18 @@ OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY: bool = _get_bool(
 )
 OLLAMA_GENERATE_KEEP_ALIVE: str = os.getenv("OLLAMA_GENERATE_KEEP_ALIVE", "0")
 
+# Réglages du pipeline de raisonnement adaptatif.
+# Par défaut, `fast` conserve exactement le comportement historique : un seul
+# appel Ollama, sans critique interne.
+REASONING_MODE: str = os.getenv("REASONING_MODE", "fast")
+REASONING_AUTO_SELECT: bool = _get_bool("REASONING_AUTO_SELECT", False)
+REASONING_MAX_LOOPS: int = _get_int("REASONING_MAX_LOOPS", 3)
+REASONING_ENABLE_CRITIC: bool = _get_bool("REASONING_ENABLE_CRITIC", True)
+REASONING_FAST_MODEL: str = os.getenv("REASONING_FAST_MODEL", "")
+REASONING_BALANCED_MODEL: str = os.getenv("REASONING_BALANCED_MODEL", "")
+REASONING_DEEP_MODEL: str = os.getenv("REASONING_DEEP_MODEL", "")
+REASONING_CRITIC_MODEL: str = os.getenv("REASONING_CRITIC_MODEL", "")
+
 # Port de l'API orchestrateur
 ORCHESTRATOR_PORT: int = _get_int("ORCHESTRATOR_PORT", 8001)
 

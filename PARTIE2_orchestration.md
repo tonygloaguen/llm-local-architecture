@@ -1,5 +1,39 @@
 # PARTIE 2 — ORCHESTRATEUR PAR SUJET
 
+## État actuel du repo
+
+Le repo actuel n’utilise pas LangGraph. L’orchestration réellement livrée est composée de :
+
+- `src/llm_local_architecture/router.py` : routing déterministe par mots-clés
+- `src/llm_local_architecture/orchestrator.py` : API/CLI FastAPI et appels Ollama
+- `src/llm_local_architecture/reasoning.py` : Adaptive Reasoning Pipeline opt-in
+
+Le comportement par défaut reste `fast` :
+
+- un seul modèle sélectionné par le routeur
+- un seul appel Ollama
+- fallback simple vers `phi4-mini` si le modèle sélectionné échoue
+- purge des autres modèles résidents avant génération
+- `keep_alive=0` par défaut via `OLLAMA_GENERATE_KEEP_ALIVE=0`
+
+Modes reasoning disponibles :
+
+| Mode | Comportement | Coût latence |
+|---|---|---|
+| `fast` | Génération directe | Identique à l’existant |
+| `balanced` | Génération, critique interne courte, révision si nécessaire | Plusieurs appels séquentiels |
+| `deep` | Génération, critique interne structurée, correction/validation | Plusieurs appels séquentiels, maximum 3 boucles |
+
+La critique interne n’est pas exposée à l’utilisateur et ne doit pas être assimilée à une chain-of-thought publiée. Les logs restent limités au mode, modèle, boucle, fallback et erreur résumée.
+
+`REASONING_AUTO_SELECT=false` par défaut. Si activé, l’auto-select est une heuristique déterministe simple : demandes courtes vers `fast`, demandes techniques standard vers `balanced`, code/logs/sécurité/diagnostic/correction vers `deep`.
+
+Important sur Windows 11 / RTX 5060 8 Go : il n’y a pas de parallélisme multi-modèle. Le modèle de critique reste le modèle courant sauf si `REASONING_CRITIC_MODEL` est explicitement configuré.
+
+Les sections LangGraph ci-dessous sont des éléments de conception historique/prospective. Elles ne décrivent pas l’état actuel du code.
+
+---
+
 ## Stratégie : routing déterministe, pas de ML
 
 Le routing est basé sur des règles explicites appliquées sur le prompt entrant.
@@ -101,6 +135,8 @@ def estimate_complexity(prompt: str) -> str:
 
 ## Cas séquentiels (2 modèles en pipeline)
 
+Non implémenté dans l’état actuel. Le pipeline livré fait des étapes séquentielles de génération/critique/révision, mais privilégie le même modèle pour limiter la pression VRAM.
+
 | Scénario | Modèle 1 | Modèle 2 | Déclencheur |
 |----------|----------|----------|-------------|
 | Génération + review sécurité | qwen2.5-coder | granite3.3 | `mode="generate_and_audit"` |
@@ -111,6 +147,8 @@ def estimate_complexity(prompt: str) -> str:
 ---
 
 ## Stratégie de fallback (timeout)
+
+État actuel du code : fallback unique vers `DEFAULT_MODEL`, actuellement `phi4-mini`, via `_generate_with_fallback()`. Les chaînes de fallback multi-niveaux ci-dessous sont prospectives.
 
 ```
 Timeout par défaut : 120s
@@ -131,10 +169,11 @@ Ordre de fallback :
 
 ## Stratégie d'arbitrage (deux modèles divergents)
 
+Non implémenté dans l’état actuel. Le pipeline adaptatif ne lance pas deux modèles en parallèle.
+
 Applicable quand deux modèles sont appelés en parallèle sur la même question :
 1. Si les sorties concordent → retourner la plus courte (plus précise)
-2. Si divergence sur un fact technique → demander à `deepseek-r1` de trancher avec
-   chain-of-thought explicite
+2. Si divergence sur un fait technique → demander à un modèle arbitre une justification concise, sans chain-of-thought détaillée
 3. Si divergence sur du code → exécuter les deux et garder celui qui passe les tests
 
 ---

@@ -163,7 +163,8 @@ def _configure_tesseract() -> str:
 
 def _available_languages() -> set[str]:
     _configure_tesseract()
-    assert pytesseract is not None
+    if pytesseract is None:
+        raise RuntimeError("pytesseract n'est pas disponible après configuration.")
     return set(pytesseract.get_languages(config=""))
 
 
@@ -429,7 +430,8 @@ def _mean_confidence(data: dict[str, list[Any]]) -> float:
 
 def _run_tesseract(image: np.ndarray[Any, Any], *, lang: str, psm: int, oem: int) -> tuple[str, float]:
     _configure_tesseract()
-    assert pytesseract is not None
+    if pytesseract is None:
+        raise RuntimeError("pytesseract n'est pas disponible après configuration.")
     pil_image = _to_pil_image(image)
     config = _tesseract_config(psm, oem)
     text = pytesseract.image_to_string(pil_image, lang=lang, config=config).strip()
