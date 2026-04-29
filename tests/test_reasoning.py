@@ -41,10 +41,10 @@ async def test_balanced_calls_generation_critique_and_revision(monkeypatch) -> N
     calls: list[tuple[str, str]] = []
     responses = iter(
         [
-            ("brouillon", "qwen2.5-coder:7b-instruct", False),
-            ("FIX: ajoute la contrainte VRAM", "qwen2.5-coder:7b-instruct", False),
-            ("réponse révisée", "qwen2.5-coder:7b-instruct", False),
-            ("OK", "qwen2.5-coder:7b-instruct", False),
+            ("brouillon", "qwen3:8b", False),
+            ("FIX: ajoute la contrainte VRAM", "qwen3:8b", False),
+            ("réponse révisée", "qwen3:8b", False),
+            ("OK", "qwen3:8b", False),
         ]
     )
 
@@ -63,10 +63,12 @@ async def test_balanced_calls_generation_critique_and_revision(monkeypatch) -> N
     assert result.mode == "balanced"
     assert result.loops == 2
     assert len(calls) == 4
-    assert calls[0] == ("Explique cette configuration Python", "qwen2.5-coder:7b-instruct")
+    assert calls[0] == ("/no_think\nExplique cette configuration Python", "qwen3:8b")
     assert "Critique interne courte" in calls[1][0]
     assert "Révise la réponse candidate" in calls[2][0]
-    assert calls[1][1] == calls[2][1] == "qwen2.5-coder:7b-instruct"
+    assert calls[1][0].startswith("/no_think\n")
+    assert calls[2][0].startswith("/no_think\n")
+    assert calls[1][1] == calls[2][1] == "qwen3:8b"
 
 
 @pytest.mark.asyncio
@@ -101,19 +103,59 @@ def test_auto_select_chooses_fast_for_simple_prompt(monkeypatch) -> None:
     assert reasoning.resolve_reasoning_mode("Bonjour", None) == "fast"
 
 
+def test_balanced_qwen3_adds_no_think() -> None:
+    prompt = reasoning.apply_reasoning_directive("Explique cette config", "balanced", "qwen3:8b")
+
+    assert prompt.startswith("/no_think\n")
+
+
+def test_deep_qwen3_adds_think() -> None:
+    prompt = reasoning.apply_reasoning_directive("Analyse ce traceback", "deep", "qwen3:8b")
+
+    assert prompt.startswith("/think\n")
+
+
+def test_non_qwen3_model_gets_no_reasoning_directive() -> None:
+    prompt = "Analyse ce traceback"
+
+    assert reasoning.apply_reasoning_directive(prompt, "deep", "phi4-mini") == prompt
+    assert reasoning.apply_reasoning_directive(prompt, "balanced", "qwen2.5-coder:7b-instruct") == prompt
+
+
+def test_think_tags_are_removed_from_final_response(monkeypatch) -> None:
+    monkeypatch.setattr(reasoning, "REASONING_DEBUG_THINK_TAGS", False)
+
+    filtered = reasoning.filter_thinking_tags("<think>raisonnement privé</think>\nRéponse publique")
+
+    assert filtered == "Réponse publique"
+
+
 @pytest.mark.parametrize(
     "prompt",
     [
         "Traceback RuntimeError dans pytest",
         "Audite ce pipeline GitHub Actions avec gitleaks et trivy",
-        "Corrige ce Dockerfile FastAPI",
-        "```python\nraise Exception('boom')\n```",
+        "Analyse ces logs Docker:\nERROR container failed\nFATAL out of memory",
+        "```text\nTraceback RuntimeError boom\n```",
     ],
 )
 def test_auto_select_chooses_deep_for_code_logs_or_security(monkeypatch, prompt: str) -> None:
     monkeypatch.setattr(reasoning, "REASONING_AUTO_SELECT", True)
 
     assert reasoning.resolve_reasoning_mode(prompt, None) == "deep"
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Patch Python pour corriger cette fonction",
+        "Corrige ce workflow GitHub Actions",
+    ],
+)
+def test_auto_select_chooses_balanced_for_code_patch(monkeypatch, prompt: str) -> None:
+    monkeypatch.setattr(reasoning, "REASONING_AUTO_SELECT", True)
+
+    assert reasoning.resolve_reasoning_mode(prompt, None) == "balanced"
 
 
 @pytest.mark.asyncio
@@ -202,7 +244,7 @@ async def test_explicit_critic_model_is_used_only_when_configured(monkeypatch) -
     calls: list[str] = []
     responses = iter(
         [
-            ("draft", "qwen2.5-coder:7b-instruct", False),
+            ("draft", "qwen3:8b", False),
             ("OK", "granite3.3:8b", False),
         ]
     )
@@ -218,4 +260,4 @@ async def test_explicit_critic_model_is_used_only_when_configured(monkeypatch) -
         generate=generate,
     )
 
-    assert calls == ["qwen2.5-coder:7b-instruct", "granite3.3:8b"]
+    assert calls == ["qwen3:8b", "granite3.3:8b"]

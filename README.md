@@ -158,6 +158,26 @@ Cette stratégie est activée par défaut via :
 
 Le pipeline de raisonnement adaptatif respecte cette stratégie. Chaque étape passe par le même chemin d’appel Ollama que la génération standard, avec fallback et purge préalable. Il n’y a pas d’appel parallèle multi-modèle. Les modes `balanced` et `deep` font en revanche plusieurs appels séquentiels et augmentent donc la latence.
 
+Architecture modèle recommandée pour 8 Go VRAM :
+
+- `FAST = phi4-mini`
+- `BALANCED = qwen3:8b` avec directive `/no_think`
+- `DEEP = qwen3:8b` avec directive `/think`
+- `CODE = qwen2.5-coder:7b-instruct`
+
+`qwen3:8b` sert de pivot unique pour `balanced` et `deep` afin de limiter les rechargements VRAM entre deux niveaux de raisonnement. Cette configuration est une recommandation terrain à benchmarker sur la machine cible, pas une garantie d'amélioration universelle. Les quantifications Q4_K_M sont recommandées en première intention sur 8 Go VRAM ; Q5_K_M peut être testé ensuite comme option expérimentale si la VRAM, la latence et `ollama ps` restent stables.
+
+Modèles legacy/optionnels conservés : `mistral`, `deepseek-r1` et `granite`. Ils restent dans le catalogue si déjà installés, mais ne sont plus privilégiés par défaut.
+
+Commandes Ollama recommandées :
+
+```bash
+ollama pull qwen3:8b
+ollama pull phi4-mini
+ollama pull qwen2.5-coder:7b-instruct
+ollama ps
+```
+
 Configuration recommandée sur Windows 11 / RTX 5060 8 Go :
 
 ```powershell
@@ -245,13 +265,16 @@ Valeurs par défaut :
 - `REASONING_MAX_LOOPS=3`
 - `REASONING_ENABLE_CRITIC=true`
 - `REASONING_FAST_MODEL=`
-- `REASONING_BALANCED_MODEL=`
-- `REASONING_DEEP_MODEL=`
+- `REASONING_BALANCED_MODEL=qwen3:8b`
+- `REASONING_DEEP_MODEL=qwen3:8b`
 - `REASONING_CRITIC_MODEL=`
+- `REASONING_DEBUG_THINK_TAGS=false`
 
 Par défaut, le comportement reste identique à l’ancien orchestrateur : un seul appel de génération.
 
 La critique interne n’est jamais retournée à l’utilisateur. Elle sert uniquement à décider si une réponse doit être révisée. Les prompts internes demandent explicitement de ne pas exposer de raisonnement détaillé ni de chain-of-thought.
+
+Pour les modèles Qwen3 compatibles, le pipeline ajoute `/no_think` en `balanced` et `/think` en `deep`. Les balises `<think>...</think>` sont filtrées avant réponse finale, sauf debug explicite via `REASONING_DEBUG_THINK_TAGS=true`.
 
 Les modes `balanced` et `deep` augmentent la latence, car ils font plusieurs appels Ollama séquentiels. Le modèle de critique est le modèle courant par défaut. `REASONING_CRITIC_MODEL` n’est utilisé que si cette variable est explicitement configurée.
 
@@ -261,7 +284,9 @@ Auto-select :
 - activable avec `REASONING_AUTO_SELECT=true`
 - simple et déterministe, sans ML
 - choisit `fast` pour les demandes courtes ou simples
-- choisit `deep` pour code, logs, traceback, sécurité, Docker, GitHub Actions, CI/CD, pytest, bandit, trivy, gitleaks, checkov, SSH, Proxmox, Ollama, FastAPI, WordPress, audit, diagnostic, correction, comparaison ou plan
+- choisit `balanced` pour les demandes techniques standard et les patchs code simples
+- choisit `deep` pour logs longs, traceback, sécurité, audit, CI/CD, diagnostic multi-étapes, comparaison complexe ou plan
+- le routeur choisit `qwen2.5-coder:7b-instruct` pour les tâches clairement code : Python, FastAPI, pytest, GitHub Actions, Docker, refactor, patch, bugfix
 
 4. Interface web locale
 
@@ -324,13 +349,14 @@ Modèles configurés
 
 Le routeur référence actuellement les modèles suivants :
 
+qwen3:8b
 qwen2.5-coder:7b-instruct
+phi4-mini
 granite3.3:8b
 deepseek-r1:7b
-phi4-mini
 mistral:7b-instruct-v0.3-q4_K_M
 
-Leur rôle et les règles de routage sont définis dans src/llm_local_architecture/config.py.
+Leur rôle et les règles de routage sont définis dans src/llm_local_architecture/config.py. `granite`, `deepseek-r1` et `mistral` sont conservés comme modèles legacy/optionnels.
 
 Prérequis
 Python
@@ -557,6 +583,7 @@ REASONING_FAST_MODEL
 REASONING_BALANCED_MODEL
 REASONING_DEEP_MODEL
 REASONING_CRITIC_MODEL
+REASONING_DEBUG_THINK_TAGS
 
 Exemple :
 
@@ -567,6 +594,8 @@ export REASONING_MODE=fast
 export REASONING_AUTO_SELECT=false
 export REASONING_MAX_LOOPS=3
 export REASONING_ENABLE_CRITIC=true
+export REASONING_BALANCED_MODEL=qwen3:8b
+export REASONING_DEEP_MODEL=qwen3:8b
 export OCR_TESSERACT_LANG=fra
 export OCR_TESSERACT_FALLBACK_LANG=fra+eng
 export OCR_TESSERACT_PSM=6
@@ -716,6 +745,9 @@ Le pipeline adaptatif est couvert par des tests mockés côté CI. Un test réel
 Commandes de test manuel :
 
 ```bash
+ollama pull qwen3:8b
+ollama pull phi4-mini
+ollama pull qwen2.5-coder:7b-instruct
 ollama ps
 
 curl -s -X POST http://127.0.0.1:8001/generate \

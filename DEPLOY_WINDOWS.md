@@ -155,7 +155,13 @@ Exemples :
 # Vérifier que les modèles sont bien installés
 ollama list
 
-# Test rapide
+# Modèles recommandés RTX 5060 / 8 Go VRAM
+ollama pull qwen3:8b
+ollama pull phi4-mini
+ollama pull qwen2.5-coder:7b-instruct
+ollama ps
+
+# Test rapide FAST
 ollama run phi4-mini "Dis bonjour en une phrase"
 
 # API Ollama
@@ -193,8 +199,9 @@ Ou sans repasser par le script :
 L’application FastAPI locale expose un pipeline de raisonnement adaptatif opt-in :
 
 - `fast` : comportement par défaut, un seul appel Ollama
-- `balanced` : génération, critique interne courte, révision si nécessaire
-- `deep` : génération, critique interne structurée, correction/validation avec boucles bornées
+- `balanced` : `qwen3:8b` avec `/no_think`, génération, critique interne courte, révision si nécessaire
+- `deep` : `qwen3:8b` avec `/think`, génération, critique interne structurée, correction/validation avec boucles bornées
+- `code` : `qwen2.5-coder:7b-instruct` pour Python, FastAPI, pytest, GitHub Actions, Docker, refactor, patch, bugfix
 
 Par défaut, Windows conserve le comportement le plus léger :
 
@@ -210,11 +217,15 @@ $env:OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY="1"
 $env:OLLAMA_GENERATE_KEEP_ALIVE="0"
 $env:REASONING_MAX_LOOPS="3"
 $env:REASONING_ENABLE_CRITIC="true"
+$env:REASONING_BALANCED_MODEL="qwen3:8b"
+$env:REASONING_DEEP_MODEL="qwen3:8b"
 ```
 
-Les modes `balanced` et `deep` font plusieurs appels Ollama séquentiels. Ils peuvent améliorer la relecture interne, mais augmentent la latence. Ils ne lancent pas plusieurs modèles en parallèle.
+Les modes `balanced` et `deep` font plusieurs appels Ollama séquentiels. Ils peuvent améliorer la relecture interne, mais augmentent la latence. Ils ne lancent pas plusieurs modèles en parallèle. `qwen3:8b` est utilisé comme pivot pour réduire les rechargements VRAM entre `balanced` et `deep`.
 
 Le modèle de critique reste le modèle courant sauf si `REASONING_CRITIC_MODEL` est explicitement défini. Sur 8 Go VRAM, laisser `REASONING_CRITIC_MODEL` vide est le choix recommandé.
+
+Privilégier Q4_K_M en première intention sur 8 Go VRAM. Q5_K_M est seulement une option expérimentale à tester si `ollama ps`, la VRAM et la latence restent stables. `mistral`, `deepseek-r1` et `granite` restent utilisables comme modèles legacy/optionnels, mais ne sont plus le chemin recommandé par défaut.
 
 Exemples :
 
@@ -229,11 +240,16 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/generate" `
   -ContentType "application/json" `
   -Body '{"prompt":"Analyse ce traceback pytest: RuntimeError dans test_api.py","reasoning_mode":"deep"}'
 
+# Balanced standard : Qwen3 sans thinking
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/generate" `
+  -ContentType "application/json" `
+  -Body '{"prompt":"Explique cette configuration FastAPI","reasoning_mode":"balanced"}'
+
 # Auto-select déterministe pour la session courante
 $env:REASONING_AUTO_SELECT="true"
 ```
 
-La critique interne n’est jamais affichée à l’utilisateur. L’orchestrateur loggue seulement le mode, le modèle, la boucle, le fallback et les erreurs résumées.
+La critique interne n’est jamais affichée à l’utilisateur. Les balises `<think>...</think>` sont filtrées sauf debug explicite. L’orchestrateur loggue seulement le mode, le modèle, la directive appliquée, le nombre d'appels Ollama, le fallback, la durée et les erreurs résumées.
 
 Commande Docker manuelle équivalente au script :
 
