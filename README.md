@@ -9,6 +9,7 @@ Application locale simple au-dessus d’Ollama, avec :
 Le projet fournit aujourd’hui :
 - un routeur Python déterministe
 - un orchestrateur local FastAPI/CLI au-dessus d’Ollama
+- un Adaptive Reasoning Pipeline opt-in (`fast`, `balanced`, `deep`)
 - une interface web locale simple
 - un pipeline documentaire local
 - un OCR local configurable
@@ -16,7 +17,7 @@ Le projet fournit aujourd’hui :
 - un `docker-compose` optionnel pour Ollama et Open WebUI
 
 Le projet ne fournit pas encore :
-- d’orchestration multi-étapes avancée
+- d’orchestration multi-étapes avancée entre plusieurs modèles
 - de coordination automatique entre plusieurs modèles dans une même requête
 - d’intégration d’Open WebUI via l’orchestrateur
 - de LangGraph
@@ -155,6 +156,19 @@ Cette stratégie est activée par défaut via :
 - `OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY=1`
 - `OLLAMA_GENERATE_KEEP_ALIVE=0`
 
+Le pipeline de raisonnement adaptatif respecte cette stratégie. Chaque étape passe par le même chemin d’appel Ollama que la génération standard, avec fallback et purge préalable. Il n’y a pas d’appel parallèle multi-modèle. Les modes `balanced` et `deep` font en revanche plusieurs appels séquentiels et augmentent donc la latence.
+
+Configuration recommandée sur Windows 11 / RTX 5060 8 Go :
+
+```powershell
+$env:OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY="1"
+$env:OLLAMA_GENERATE_KEEP_ALIVE="0"
+$env:REASONING_MODE="fast"
+$env:REASONING_AUTO_SELECT="false"
+$env:REASONING_MAX_LOOPS="3"
+$env:REASONING_ENABLE_CRITIC="true"
+```
+
 Pour diagnostiquer un fallback CPU ou une latence anormale sous Windows, vérifier d’abord :
 
 - `ollama ps`
@@ -169,6 +183,7 @@ Composants réellement présents dans le repo :
 Routeur déterministe : src/llm_local_architecture/router.py
 Configuration centrale : src/llm_local_architecture/config.py
 Orchestrateur local CLI/API/web : src/llm_local_architecture/orchestrator.py
+Pipeline reasoning : src/llm_local_architecture/reasoning.py
 Pipeline documentaire : src/llm_local_architecture/documents.py
 OCR local : src/llm_local_architecture/ocr.py
 Mémoire SQLite : src/llm_local_architecture/memory.py
@@ -206,11 +221,48 @@ appelle le routeur
 transmet la requête à Ollama avec le modèle choisi
 retourne la réponse
 applique un fallback simple sur phi4-mini si nécessaire
+peut appliquer un pipeline de raisonnement adaptatif opt-in
 gère aussi :
 l’interface web locale
 le pipeline documentaire
 la mémoire persistante
 les métadonnées de réponse
+
+### Adaptive Reasoning Pipeline
+
+Le pipeline adaptatif est implémenté dans `src/llm_local_architecture/reasoning.py`.
+
+Modes disponibles :
+
+- `fast` : comportement historique, un seul appel Ollama, sans critique interne
+- `balanced` : génération initiale, critique interne courte, révision finale si nécessaire
+- `deep` : génération initiale, critique interne structurée, correction/validation avec au maximum 3 boucles
+
+Valeurs par défaut :
+
+- `REASONING_MODE=fast`
+- `REASONING_AUTO_SELECT=false`
+- `REASONING_MAX_LOOPS=3`
+- `REASONING_ENABLE_CRITIC=true`
+- `REASONING_FAST_MODEL=`
+- `REASONING_BALANCED_MODEL=`
+- `REASONING_DEEP_MODEL=`
+- `REASONING_CRITIC_MODEL=`
+
+Par défaut, le comportement reste identique à l’ancien orchestrateur : un seul appel de génération.
+
+La critique interne n’est jamais retournée à l’utilisateur. Elle sert uniquement à décider si une réponse doit être révisée. Les prompts internes demandent explicitement de ne pas exposer de raisonnement détaillé ni de chain-of-thought.
+
+Les modes `balanced` et `deep` augmentent la latence, car ils font plusieurs appels Ollama séquentiels. Le modèle de critique est le modèle courant par défaut. `REASONING_CRITIC_MODEL` n’est utilisé que si cette variable est explicitement configurée.
+
+Auto-select :
+
+- désactivé par défaut
+- activable avec `REASONING_AUTO_SELECT=true`
+- simple et déterministe, sans ML
+- choisit `fast` pour les demandes courtes ou simples
+- choisit `deep` pour code, logs, traceback, sécurité, Docker, GitHub Actions, CI/CD, pytest, bandit, trivy, gitleaks, checkov, SSH, Proxmox, Ollama, FastAPI, WordPress, audit, diagnostic, correction, comparaison ou plan
+
 4. Interface web locale
 
 L’interface web locale est servie directement par FastAPI.
@@ -415,10 +467,35 @@ curl -s -X POST http://127.0.0.1:8001/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Génère un endpoint FastAPI GET /health"}'
 
+Exemple generate en mode fast explicite :
+
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Résume Python en une phrase","reasoning_mode":"fast"}'
+
+Exemple generate en mode deep sur logs :
+
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Analyse ce traceback pytest: RuntimeError dans test_api.py","reasoning_mode":"deep"}'
+
+Activation auto-select pour la session :
+
+export REASONING_AUTO_SELECT=true
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Audite ce workflow GitHub Actions avec gitleaks"}'
+
 Exemple chat texte seul :
 
 curl -s -X POST http://127.0.0.1:8001/chat \
   -F 'prompt=Rédige un mail professionnel de relance'
+
+Exemple chat avec reasoning opt-in :
+
+curl -s -X POST http://127.0.0.1:8001/chat \
+  -F 'prompt=Analyse ces logs et propose une correction' \
+  -F 'reasoning_mode=deep'
 
 Exemple chat avec document :
 
@@ -470,10 +547,26 @@ OCR_MIN_EXTRACTED_CHARS
 OCR_DEBUG_SAVE_INTERMEDIATES
 OCR_TESSERACT_CMD
 TESSERACT_CMD
+OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY
+OLLAMA_GENERATE_KEEP_ALIVE
+REASONING_MODE
+REASONING_AUTO_SELECT
+REASONING_MAX_LOOPS
+REASONING_ENABLE_CRITIC
+REASONING_FAST_MODEL
+REASONING_BALANCED_MODEL
+REASONING_DEEP_MODEL
+REASONING_CRITIC_MODEL
 
 Exemple :
 
 export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY=1
+export OLLAMA_GENERATE_KEEP_ALIVE=0
+export REASONING_MODE=fast
+export REASONING_AUTO_SELECT=false
+export REASONING_MAX_LOOPS=3
+export REASONING_ENABLE_CRITIC=true
 export OCR_TESSERACT_LANG=fra
 export OCR_TESSERACT_FALLBACK_LANG=fra+eng
 export OCR_TESSERACT_PSM=6
@@ -531,6 +624,7 @@ sans `--profile full` ou `--profile webui-only`, Docker peut répondre `no servi
 le compose surcharge aussi le healthcheck Open WebUI pour éviter le healthcheck jq embarqué dans l’image, qui peut marquer le conteneur `unhealthy` alors que l’UI répond bien
 dans ce mode, Open WebUI pointe vers l’Ollama natif
 l’orchestrateur Python n’est pas dans la boucle
+Open WebUI ne bénéficie donc pas automatiquement du routing ni du pipeline adaptatif s’il appelle Ollama directement.
 Scripts
 
 Le repo contient deux scripts principaux avec des rôles différents.
@@ -605,6 +699,59 @@ upload image scannée pour valider Tesseract
 Limites actuelles
 
 Le projet n’est pas encore une plateforme d’orchestration avancée entre plusieurs LLM.
+
+Limites du Adaptive Reasoning Pipeline :
+
+- les tests du Lot A sont mockés, sans appel Ollama réel
+- l’auto-select est simple et déterministe
+- aucun parallélisme multi-modèle n’est implémenté
+- `balanced` et `deep` augmentent la latence car ils font plusieurs appels séquentiels
+- la critique interne n’est pas exposée, et le projet ne fournit pas de chain-of-thought détaillée
+- Open WebUI ne bénéficie pas automatiquement du pipeline s’il parle directement à Ollama
+
+### Validation terrain à réaliser
+
+Le pipeline adaptatif est couvert par des tests mockés côté CI. Un test réel Ollama reste recommandé sur Windows 11 avec RTX 5060 8 Go pour mesurer la latence et vérifier la résidence mémoire.
+
+Commandes de test manuel :
+
+```bash
+ollama ps
+
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Réponds en une phrase: que fait FastAPI ?","reasoning_mode":"fast"}'
+
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Analyse ces logs Docker: container exited with code 137","reasoning_mode":"balanced"}'
+
+curl -s -X POST http://127.0.0.1:8001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Analyse ce traceback Python RuntimeError dans pytest et propose un diagnostic","reasoning_mode":"deep"}'
+
+ollama ps
+```
+
+À observer :
+
+- un seul modèle chargé à la fois dans `ollama ps`
+- `keep_alive=0` respecté après les générations
+- pas de fuite VRAM après plusieurs appels
+- latence acceptable en `balanced` et `deep` pour l’usage visé
+
+Benchmark terrain à compléter :
+
+| Cas de test | Mode fast | Mode balanced | Mode deep | Modèle utilisé | Observation VRAM |
+|---|---:|---:|---:|---|---|
+| question simple | | | | | |
+| logs Docker | | | | | |
+| traceback Python | | | | | |
+| analyse sécurité / CI | | | | | |
+
+### Note CI sécurité
+
+Trivy est actuellement non bloquant volontairement dans le workflow `Security`. Le `--exit-code 0` est temporaire pour éviter de casser la CI au départ. Après stabilisation, le durcissement recommandé est de rendre Trivy bloquant sur `CRITICAL`, puis éventuellement sur `HIGH,CRITICAL` dans un second temps.
 
 Limites OCR connues :
 

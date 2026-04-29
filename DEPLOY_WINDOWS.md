@@ -186,6 +186,55 @@ Ou sans repasser par le script :
 .\.venv\Scripts\python.exe -m uvicorn llm_local_architecture.orchestrator:app --host 127.0.0.1 --port 8001
 ```
 
+---
+
+## Adaptive Reasoning Pipeline sur RTX 5060 8 Go
+
+L’application FastAPI locale expose un pipeline de raisonnement adaptatif opt-in :
+
+- `fast` : comportement par défaut, un seul appel Ollama
+- `balanced` : génération, critique interne courte, révision si nécessaire
+- `deep` : génération, critique interne structurée, correction/validation avec boucles bornées
+
+Par défaut, Windows conserve le comportement le plus léger :
+
+```powershell
+$env:REASONING_MODE="fast"
+$env:REASONING_AUTO_SELECT="false"
+```
+
+Sur une RTX 5060 8 Go, garder la résidence modèle stricte :
+
+```powershell
+$env:OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY="1"
+$env:OLLAMA_GENERATE_KEEP_ALIVE="0"
+$env:REASONING_MAX_LOOPS="3"
+$env:REASONING_ENABLE_CRITIC="true"
+```
+
+Les modes `balanced` et `deep` font plusieurs appels Ollama séquentiels. Ils peuvent améliorer la relecture interne, mais augmentent la latence. Ils ne lancent pas plusieurs modèles en parallèle.
+
+Le modèle de critique reste le modèle courant sauf si `REASONING_CRITIC_MODEL` est explicitement défini. Sur 8 Go VRAM, laisser `REASONING_CRITIC_MODEL` vide est le choix recommandé.
+
+Exemples :
+
+```powershell
+# Fast explicite : un seul appel
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/generate" `
+  -ContentType "application/json" `
+  -Body '{"prompt":"Résume Python en une phrase","reasoning_mode":"fast"}'
+
+# Deep sur logs : plusieurs appels séquentiels
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/generate" `
+  -ContentType "application/json" `
+  -Body '{"prompt":"Analyse ce traceback pytest: RuntimeError dans test_api.py","reasoning_mode":"deep"}'
+
+# Auto-select déterministe pour la session courante
+$env:REASONING_AUTO_SELECT="true"
+```
+
+La critique interne n’est jamais affichée à l’utilisateur. L’orchestrateur loggue seulement le mode, le modèle, la boucle, le fallback et les erreurs résumées.
+
 Commande Docker manuelle équivalente au script :
 
 ```powershell

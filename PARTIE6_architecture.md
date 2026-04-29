@@ -1,5 +1,25 @@
 # PARTIE 6 — ARCHITECTURE TECHNIQUE
 
+## État actuel
+
+L’architecture actuelle du repo est plus simple que les schémas LangGraph historiques :
+
+- FastAPI/CLI : `src/llm_local_architecture/orchestrator.py`
+- routing déterministe : `src/llm_local_architecture/router.py`
+- configuration : `src/llm_local_architecture/config.py`
+- pipeline adaptatif opt-in : `src/llm_local_architecture/reasoning.py`
+- client Ollama : appels HTTP directs vers `/api/generate`, `/api/ps`, `/api/tags`
+
+Le pipeline adaptatif propose :
+
+- `fast` par défaut : un seul appel Ollama
+- `balanced` : génération, critique interne courte, révision si nécessaire
+- `deep` : génération, critique interne structurée, correction/validation avec maximum 3 boucles
+
+La critique interne n’est pas exposée et aucun chain-of-thought détaillé n’est retourné.
+
+---
+
 ## Décision runtime : Ollama seul (pas llama.cpp direct)
 
 **Ollama retenu, llama.cpp direct écarté. Raisons :**
@@ -68,6 +88,19 @@
 
 ## Chargement : permanent vs à la demande
 
+État actuel recommandé pour Windows 11 / RTX 5060 8 Go : pas de modèle permanent volontaire côté orchestrateur. Le repo applique une résidence stricte d’un seul modèle Ollama à la fois.
+
+Variables par défaut côté orchestrateur :
+
+```bash
+OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY=1
+OLLAMA_GENERATE_KEEP_ALIVE=0
+```
+
+Avant chaque génération, l’orchestrateur lit `/api/ps`, arrête les modèles résidents qui ne sont pas le modèle sélectionné, puis appelle `/api/generate` avec `keep_alive=0`. Les modes `balanced` et `deep` gardent cette règle, mais font plusieurs appels séquentiels.
+
+Les notes ci-dessous sur un modèle permanent sont historiques/prospectives et ne sont pas le réglage recommandé pour la cible 8 Go VRAM.
+
 **Permanent** (toujours en VRAM) :
 ```bash
 # phi4-mini reste chargé → désactiver le timeout de déchargement Ollama
@@ -94,6 +127,23 @@ pour charger en VRAM, ensuite fluide jusqu'à l'inactivité de 5min.
 ---
 
 ## Structure projet orchestrateur
+
+Structure réelle du repo actuel :
+
+```
+src/llm_local_architecture/
+├── orchestrator.py   # API FastAPI, CLI, client Ollama, fallback, purge VRAM
+├── router.py         # routing déterministe
+├── reasoning.py      # Adaptive Reasoning Pipeline opt-in
+├── config.py         # variables env, modèles, règles de routing
+├── prompting.py      # construction du prompt final
+├── documents.py      # pipeline documentaire
+├── ocr.py            # OCR local
+├── memory.py         # mémoire SQLite
+└── static/           # interface web locale
+```
+
+La structure ci-dessous correspond à une cible historique LangGraph, non présente dans le code actuel.
 
 ```
 /home/gloaguen/projets/local-llm-orchestrator/
@@ -177,6 +227,7 @@ Raisons d'exclusion du setup initial :
 - Port 3000 ou 8080 potentiellement exposé si mal configuré
 - Inutile pour l'usage principal (scripts Python, Claude Code CLI)
 - Pas de gain fonctionnel pour l'orchestrateur LangGraph
+- Si Open WebUI parle directement à Ollama, il ne bénéficie pas du routing ni du pipeline adaptatif du repo
 
 **Cas où Open WebUI est pertinent** :
 - Accès occasionnel via browser pour tests manuels de prompts

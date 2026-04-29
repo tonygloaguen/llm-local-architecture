@@ -1,8 +1,73 @@
-data/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build / packaging
+build/
+dist/
 *.egg-info/
 src/*.egg-info/
 src/llm_local_architecture.egg-info/
-__pycache__/
-.pytest_cache/
-.venv/
-bootstrap.sh.bak
+
+# Logs
+*.log
+logs/
+
+# Runtime data (LLM / Ollama / artifacts)
+artifacts/
+data/state/
+data/documents/
+data/extracted/
+data/ocr/
+*.db
+*.sqlite
+*.sqlite3
+.ollama/
+ollama/
+*.gguf
+*.safetensors
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+*.bak
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# CI temporary files
+.tox/
+.nox/
+coverage.xml
+codeburn-*.json

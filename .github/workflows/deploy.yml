@@ -22,7 +22,7 @@ jobs:
   # -----------------------------------------------------------------------
   pre-deploy-checks:
     name: Pre-deploy security checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     if: github.event.inputs.confirm == 'DEPLOY' && github.ref == 'refs/heads/main'
 
     steps:
@@ -38,10 +38,23 @@ jobs:
           fi
           echo "OK : branche main confirmée"
 
+      - name: Install Gitleaks CLI
+        run: |
+          GITLEAKS_VERSION="8.26.0"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          chmod +x /usr/local/bin/gitleaks
+          gitleaks version
+
       - name: Scan secrets pré-déploiement (Gitleaks)
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c3  # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gitleaks detect \
+            --source . \
+            --log-opts="--all" \
+            --redact \
+            --exit-code 1
 
       - name: Vérifier fichiers critiques présents
         run: |
@@ -72,7 +85,7 @@ jobs:
   # -----------------------------------------------------------------------
   deploy-linux:
     name: Deploy Linux bare metal
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: pre-deploy-checks
     if: github.event.inputs.target == 'linux-bare-metal'
 
@@ -142,7 +155,7 @@ jobs:
   # -----------------------------------------------------------------------
   deploy-windows:
     name: Deploy Windows natif
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: pre-deploy-checks
     if: github.event.inputs.target == 'windows-native'
 

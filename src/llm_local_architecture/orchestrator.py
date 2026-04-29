@@ -54,6 +54,7 @@ from .memory import (
     save_message,
 )
 from .prompting import build_generation_prompt, classify_user_intent
+from .reasoning import ReasoningResult, run_adaptive_reasoning
 from .router import route
 from .schemas import ChatResponse
 from .storage import ensure_storage
@@ -100,6 +101,7 @@ class PromptRequest(BaseModel):
 
     prompt: str
     model: str | None = None  # surcharge le routing automatique si fourni
+    reasoning_mode: str | None = None  # "fast" | "balanced" | "deep"
 
 
 class PromptResponse(BaseModel):
@@ -162,19 +164,25 @@ async def generate(req: PromptRequest) -> PromptResponse:
     selected_model = req.model or route(req.prompt)
     routed_by = "override" if req.model else "auto"
 
-    response_text, actual_model, fallback_used = await _generate_with_fallback(
+    result = await _run_generation_pipeline(
         req.prompt,
         selected_model,
+        req.reasoning_mode,
     )
-    if fallback_used:
+    if result.fallback_used:
         routed_by = f"fallback:{DEFAULT_MODEL} (original:{selected_model} indisponible)"
-    return PromptResponse(model=actual_model, routed_by=routed_by, response=response_text)
+    return PromptResponse(
+        model=result.model,
+        routed_by=routed_by,
+        response=result.response,
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     prompt: str = Form(""),
     session_id: str | None = Form(None),
+    reasoning_mode: str | None = Form(None),
     document: UploadFile | None = File(None),
 ) -> ChatResponse:
     """Point d'entrée unique de l'interface web locale."""
@@ -233,23 +241,24 @@ async def chat(
     )
     logger.debug("Chat final_prompt=%r", generation_prompt)
 
-    response_text, actual_model, fallback_used = await _generate_with_fallback(
+    result = await _run_generation_pipeline(
         generation_prompt,
         selected_model,
+        reasoning_mode,
     )
     routed_by = "auto"
-    if fallback_used:
+    if result.fallback_used:
         routed_by = f"fallback:{DEFAULT_MODEL} (original:{selected_model} indisponible)"
 
     user_message = normalized_prompt or f"[document-only] {processed_document.filename}"
     save_message(active_session_id, "user", user_message)
-    save_message(active_session_id, "assistant", response_text)
+    save_message(active_session_id, "assistant", result.response)
 
     return ChatResponse(
         session_id=active_session_id,
-        model=actual_model,
+        model=result.model,
         routed_by=routed_by,
-        response=response_text,
+        response=result.response,
         input_type=input_type,
         ocr_used=processed_document.ocr_used if processed_document else False,
         document_id=document_id,
@@ -413,6 +422,20 @@ async def _generate_with_fallback(prompt: str, selected_model: str) -> tuple[str
         )
 
 
+async def _run_generation_pipeline(
+    prompt: str,
+    selected_model: str,
+    reasoning_mode: str | None = None,
+) -> ReasoningResult:
+    """Exécute la génération historique ou le pipeline de raisonnement opt-in."""
+    return await run_adaptive_reasoning(
+        prompt=prompt,
+        selected_model=selected_model,
+        requested_mode=reasoning_mode,
+        generate=_generate_with_fallback,
+    )
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 
@@ -439,13 +462,13 @@ def main() -> None:
 async def _cli_generate(prompt: str, model: str) -> str:
     """Génère une réponse via Ollama depuis la CLI, avec fallback."""
     try:
-        result, _, fallback_used = await _generate_with_fallback(prompt, model)
-        if fallback_used:
+        result = await _run_generation_pipeline(prompt, model)
+        if result.fallback_used:
             print(
                 f"[fallback] {model} indisponible, bascule sur {DEFAULT_MODEL}",
                 file=sys.stderr,
             )
-        return result
+        return result.response
     except HTTPException:
         print(
             f"[erreur] Ollama inaccessible sur {OLLAMA_BASE_URL}",

@@ -1,5 +1,28 @@
 # PARTIE 7 — BENCHMARK RÉEL
 
+## Note sur le Adaptive Reasoning Pipeline
+
+Le benchmark ci-dessous mesure principalement les modèles appelés directement. Il ne mesure pas automatiquement le coût complet du pipeline adaptatif livré dans `src/llm_local_architecture/reasoning.py`.
+
+Pour interpréter les performances :
+
+- `fast` équivaut au comportement historique : un seul appel Ollama
+- `balanced` ajoute une critique interne courte et une révision éventuelle
+- `deep` ajoute une critique structurée et des corrections/validations bornées, maximum 3 boucles
+
+Les modes `balanced` et `deep` augmentent mécaniquement la latence, car ils font plusieurs appels Ollama séquentiels. Sur Windows 11 / RTX 5060 8 Go, vérifier `ollama ps` et garder :
+
+```bash
+OLLAMA_ENFORCE_SINGLE_MODEL_RESIDENCY=1
+OLLAMA_GENERATE_KEEP_ALIVE=0
+REASONING_MODE=fast
+REASONING_AUTO_SELECT=false
+```
+
+Les tests ajoutés pour le pipeline reasoning sont mockés et ne constituent pas un benchmark Ollama réel.
+
+---
+
 ## Script Python complet
 
 ```python
@@ -511,6 +534,7 @@ jq '.ranking[] | "\(.model): \(.scores.final)"' ~/.llm-local/logs/benchmark/benc
 - `stability < 0.7` → le modèle donne des résultats très différents à température 0 : suspect
 - `tok_per_sec < 20` → trop lent pour l'usage interactif (vérifier VRAM/CPU fallback)
 - `quality < 0.4 sur T2 (audit)` pour granite → re-évaluer le modèle ou la quantization
+- en mode `balanced` ou `deep`, raisonner en latence totale de pipeline, pas seulement en tok/s d’un appel isolé
 
 ---
 
